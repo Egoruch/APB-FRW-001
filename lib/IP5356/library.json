@@ -1,0 +1,11 @@
+{
+  "name": "IP5356",
+  "version": "1.0.0",
+  "description": "IP5356 power-bank fast-charge PMIC register accessor (I2C). Standalone: no I2C-mux dependency.",
+  "keywords": "ip5356, injoinic, power, i2c, charge",
+  "authors": [
+    { "name": "APB" }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
