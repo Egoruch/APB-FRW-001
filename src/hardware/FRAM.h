@@ -36,6 +36,10 @@ public:
     bool timeLoad(uint32_t &epoch);
     bool timeSave(uint32_t epoch);
 
+    /* Battery OVP cutoff in mV, stored separately from the config block. */
+    bool ovpLoad(uint16_t &mv);
+    bool ovpSave(uint16_t mv);
+
     void erase();   /* writes 0xFF to whole device (config reinitialized) */
 
     uint16_t capacity() const { return m_cap; }

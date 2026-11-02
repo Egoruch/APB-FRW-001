@@ -91,6 +91,8 @@ public:
     bool chargeOvpLatched() const { return m_chargeOvpLatched; }
     float ovpTripVoltage() const { return m_ovpTripVoltage; }
     uint32_t ovpTripMs() const { return m_ovpTripMs; }
+    float ovpCutoffVoltage() const { return m_ovpCutoffV; }
+    bool setOvpCutoffVoltage(float v);
     PowerMeasurement &meas(PowerChannel ch) { return monitor.get(ch); }
 
     void setLight(uint8_t pct);
@@ -150,12 +152,14 @@ private:
     volatile bool m_chargeDoneNotified = false;   /* suppress re-alarm while full */
     volatile bool m_lowBatteryLatched = false;             /* low-battery alert fired */
     bool m_chargeOvpLatched = false;                        /* over-voltage charger cutoff */
+    float m_ovpCutoffV = 4.20f;                             /* user-selectable cutoff */
     float m_ovpTripVoltage = 0;
     uint32_t m_ovpTripMs = 0;
     uint32_t m_ovpSince = 0;
     uint32_t m_ovpLastAttempt = 0;
     uint32_t m_chargerAbsentSince = 0;
     bool disableChargingIPs();
+    void loadOvpCutoff();
     volatile void *m_melodyTask = nullptr;        /* running melody task handle */
     BuzzerNote *m_melodyPack = nullptr;           /* its heap note pack */
     volatile float m_eloadR = 0;                  /* last ELOAD resistance (mOhm) */

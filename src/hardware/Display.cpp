@@ -325,7 +325,7 @@ static const CfgItem kCfg[] = {
     {"energy","energy battery set"}, {"light","light",},
     {"test","test"}, {"temperature","temperature all"}, {"i2c","i2c scan"}, {"version","version"}, {"id","id"},
     {"uptime","uptime"}, {"monitor","monitor all"}, {"mcu","mcu"},
-    {"battery","battery"}, {"buzzer","buzzer"}, {"eload","eload status"},
+    {"battery","battery"}, {"ovp","battery ovp set"}, {"buzzer","buzzer"}, {"eload","eload status"},
     {"eload test","eload test"}, {"fram","fram"}, {"melody","melody"},
     {"power","power status"}, {"rgb","rgb"},
     {"screen","display screen"},
@@ -343,6 +343,7 @@ static bool isMcu(int i)  { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].nam
 static bool isMelody(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "melody") == 0; }
 static bool isBuzzer(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "buzzer") == 0; }
 static bool isEnergy(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "energy") == 0; }
+static bool isOvp(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "ovp") == 0; }
 static bool isFram(int i) { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "fram") == 0; }
 static bool isRgb(int i)  { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "rgb") == 0; }
 static bool isLight(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "light") == 0; }
@@ -492,6 +493,11 @@ void Display::updateScreen3() {
             }
             else if (isLight(i))  snprintf(b, sizeof(b), "%s light %u%%", (i == m_cfgSel ? ">" : " "), (unsigned)(m_app ? m_app->light() : 0));
             else if (isEnergy(i)) snprintf(b, sizeof(b), "%s energy %.1f Wh", (i == m_cfgSel ? ">" : " "), m_cfgNum);
+            else if (isOvp(i)) {
+                float v = (m_cfgActive && i == m_cfgSel) ? m_cfgNum
+                                                        : (m_app ? m_app->ovpCutoffVoltage() : 4.20f);
+                snprintf(b, sizeof(b), "%s ovp %.2fV", (i == m_cfgSel ? ">" : " "), v);
+            }
             else                  snprintf(b, sizeof(b), "%s %s", (i == m_cfgSel ? ">" : " "), kCfg[i].name);
             setTextIfChanged(m_cfgItems[i], b);
             uint32_t colHex;
@@ -576,7 +582,7 @@ void Display::configTermScroll(int dir) {
 }
 
 bool Display::adjustActive() const {
-    return m_cfgActive && (isDisp(m_cfgSel) || isLight(m_cfgSel) || isEnergy(m_cfgSel));
+    return m_cfgActive && (isDisp(m_cfgSel) || isLight(m_cfgSel) || isEnergy(m_cfgSel) || isOvp(m_cfgSel));
 }
 
 void Display::startRepeat(int dir) {
@@ -608,6 +614,7 @@ void Display::configCancel() {
     if (isDisp(m_cfgSel))        setBrightness(m_initBright);
     else if (isLight(m_cfgSel) && m_app) m_app->setLight(m_initLight);
     else if (isEnergy(m_cfgSel)) m_cfgNum = m_initNum;
+    else if (isOvp(m_cfgSel))    m_cfgNum = m_initNum;
     m_cfgActive = false;
     m_repeat = false;
     m_repeatDir = 0;
@@ -628,6 +635,10 @@ void Display::configLeft() {
         int n = 0; subList(m_cfgSel, &n); if (n) { m_cfgSub--; if (m_cfgSub < 0) m_cfgSub = n - 1; }
     } else if (m_cfgActive && isEnergy(m_cfgSel)) {
         float v = m_cfgNum - 0.5f; if (v < 0) v = 0; m_cfgNum = v;
+    } else if (m_cfgActive && isOvp(m_cfgSel)) {
+        float v = m_cfgNum - 0.01f;
+        if (v < 3.00f) v = 3.00f;
+        m_cfgNum = v;
     } else {
         m_cfgSel--; if (m_cfgSel < 0) m_cfgSel = kCfgCount - 1;
         m_cfgScrollToSel = true;
@@ -648,6 +659,10 @@ void Display::configRight() {
         int n = 0; subList(m_cfgSel, &n); if (n) { m_cfgSub++; if (m_cfgSub >= n) m_cfgSub = 0; }
     } else if (m_cfgActive && isEnergy(m_cfgSel)) {
         float v = m_cfgNum + 0.5f; if (v > 2000) v = 2000; m_cfgNum = v;
+    } else if (m_cfgActive && isOvp(m_cfgSel)) {
+        float v = m_cfgNum + 0.01f;
+        if (v > 4.20f) v = 4.20f;
+        m_cfgNum = v;
     } else {
         m_cfgSel++; if (m_cfgSel >= kCfgCount) m_cfgSel = 0;
         m_cfgScrollToSel = true;
@@ -660,14 +675,20 @@ void Display::configConfirm() {
     if (m_cfgActive) {
         if      (isSubList(m_cfgSel)) runSelectedSub();
         else if (isEnergy(m_cfgSel)) runEnergySet();
+        else if (isOvp(m_cfgSel))    runOvpSet();
         else if (isDisp(m_cfgSel))   m_cfgActive = false;
         else if (isLight(m_cfgSel))  m_cfgActive = false;
     } else {
-        if (isSubList(m_cfgSel) || isDisp(m_cfgSel) || isEnergy(m_cfgSel) || isLight(m_cfgSel)) {
+        if (isSubList(m_cfgSel) || isDisp(m_cfgSel) || isEnergy(m_cfgSel) ||
+            isLight(m_cfgSel) || isOvp(m_cfgSel)) {
             m_cfgActive = true;
             if (isDisp(m_cfgSel))       m_initBright = m_bright;
             else if (isLight(m_cfgSel)) m_initLight = m_app ? m_app->light() : 0;
             else if (isEnergy(m_cfgSel)) m_initNum = m_cfgNum;
+            else if (isOvp(m_cfgSel)) {
+                m_cfgNum = m_app ? m_app->ovpCutoffVoltage() : 4.20f;
+                m_initNum = m_cfgNum;
+            }
             if (isSubList(m_cfgSel)) m_cfgSub = 0;   /* select first subcommand on entry */
         } else {
             runItem();
@@ -711,6 +732,15 @@ void Display::runEnergySet() {
     if (!m_app) return;
     char cmd[40];
     snprintf(cmd, sizeof(cmd), "energy battery set %.1f", m_cfgNum);
+    if (!m_app->postCommand(cmd))
+        Serial.printf("[ui] cmd queue full: %s\r\n", cmd);
+    m_cfgActive = false;
+}
+
+void Display::runOvpSet() {
+    if (!m_app) return;
+    char cmd[40];
+    snprintf(cmd, sizeof(cmd), "battery ovp set %.2f", m_cfgNum);
     if (!m_app->postCommand(cmd))
         Serial.printf("[ui] cmd queue full: %s\r\n", cmd);
     m_cfgActive = false;

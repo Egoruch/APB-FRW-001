@@ -124,6 +124,7 @@ private:
     const char *itemCmd(int idx);
     void runSelectedSub();
     void runEnergySet();
+    void runOvpSet();
 
     void buildBluetoothIcon();
     void updateBluetooth();            /* grey=connected, blue=not connected */

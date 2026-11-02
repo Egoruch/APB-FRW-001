@@ -157,6 +157,42 @@ bool FRAM::timeSave(uint32_t epoch) {
     return ok;
 }
 
+/* Battery OVP cutoff record at 0x0200 (separate from config and RTC pages). */
+#define FRAM_OVP_OFFSET 0x0200u
+#define FRAM_OVP_MAGIC  0x4F565031u   /* "OVP1" */
+#define FRAM_OVP_LEN    10u
+
+bool FRAM::ovpLoad(uint16_t &mv) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_OVP_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_OVP_OFFSET, (byte)FRAM_OVP_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&mv, b + 4, 2);
+    memcpy(&crc, b + 6, 4);
+    if (magic != FRAM_OVP_MAGIC) return false;
+    if (crc != persist_crc32(b, 6)) return false;
+    return mv >= 3000 && mv <= 4200;
+}
+
+bool FRAM::ovpSave(uint16_t mv) {
+    if (!m_present || mv < 3000 || mv > 4200) return false;
+    uint8_t b[FRAM_OVP_LEN];
+    uint32_t magic = FRAM_OVP_MAGIC;
+    uint32_t crc;
+    memcpy(b, &magic, 4);
+    memcpy(b + 4, &mv, 2);
+    crc = persist_crc32(b, 6);
+    memcpy(b + 6, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_OVP_OFFSET, (byte)FRAM_OVP_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
 void FRAM::save() {
     if (!m_present) return;
     bool saved = false;

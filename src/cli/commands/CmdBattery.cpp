@@ -23,6 +23,7 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
                        app.ovpTripVoltage(), (unsigned long)(app.ovpTripMs() / 1000UL));
         else
             out.println("OVP latch: off");
+        out.printf("OVP cutoff: %.2f V\r\n", app.ovpCutoffVoltage());
         out.println("OK");
         return;
     }
@@ -54,10 +55,31 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         return;
     }
     if (sub == "recalibrate") { app.battery.recalibrate(); out.println("OK battery SOC recalibrated"); return; }
-    out.println("usage: battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate>");
+    if (sub == "ovp") {
+        if (a.size() < 3 || a[2].equalsIgnoreCase("status")) {
+            out.printf("OVP cutoff: %.2f V (%s)\r\n", app.ovpCutoffVoltage(),
+                       app.chargeOvpLatched() ? "latched" : "armed");
+            out.println("OK");
+            return;
+        }
+        float v = 0.0f;
+        if (a[2].equalsIgnoreCase("set")) {
+            if (a.size() < 4) { out.println("usage: battery ovp <3.00-4.20|set 3.00-4.20>"); return; }
+            v = atof(a[3].c_str());
+        } else {
+            v = atof(a[2].c_str());
+        }
+        if (!app.setOvpCutoffVoltage(v)) {
+            out.println("ERROR OVP cutoff must be 3.00-4.20 V");
+            return;
+        }
+        out.printf("OK OVP cutoff %.2f V\r\n", app.ovpCutoffVoltage());
+        return;
+    }
+    out.println("usage: battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp>");
 }
 
 void cmdRegisterBattery(CliEngine &cli, App &app) {
     (void)app;
-    cli.registerCommand("battery", "Battery information", "battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate>", cmdBattery);
+    cli.registerCommand("battery", "Battery information", "battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp>", cmdBattery);
 }

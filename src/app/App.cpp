@@ -80,6 +80,7 @@ void App::begin() {
     buzzer.begin();      Serial.println("[app] buzzer ok");
     // mux.begin();      // temporarily disabled (per request)
     fram.begin();        Serial.println("[app] fram ok");
+    loadOvpCutoff();
     monitor.begin();     Serial.println("[app] monitor(INA) ok");
     temps.begin();       Serial.println("[app] temps ok");
     time.setSource((TimeSource)fram.data().timeSource);   /* 0 = RTC, 1 = software */
@@ -303,6 +304,23 @@ void App::setActivityTimeoutSec(uint8_t sec) {
 
 uint8_t App::activityTimeoutSec() const {
     return fram.data().activityTimeoutSec;
+}
+
+void App::loadOvpCutoff() {
+    uint16_t mv = 0;
+    if (fram.ovpLoad(mv)) m_ovpCutoffV = (float)mv / 1000.0f;
+    else                  m_ovpCutoffV = 4.20f;
+}
+
+bool App::setOvpCutoffVoltage(float v) {
+    if (v < 3.00f || v > 4.20f) return false;
+    uint16_t mv = (uint16_t)((v * 1000.0f) / 10.0f + 0.5f) * 10u;
+    if (mv < 3000 || mv > 4200) return false;
+    m_ovpCutoffV = (float)mv / 1000.0f;
+    bool saved = fram.ovpSave(mv);
+    Serial.printf("[batt] OVP cutoff set to %.2f V%s\r\n",
+                  m_ovpCutoffV, saved ? "" : " (not persisted)");
+    return true;
 }
 
 void App::onButtonEvent(const char *event, uint8_t idx) {
@@ -585,11 +603,19 @@ void App::rgbPulse(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 bool App::disableChargingIPs() {
-    /* Wake the PMICs so the charge-enable bit can be written reliably. */
-    ipman.wake();
+    /* Do not pulse the IP wake line here: waking a PMIC while it is charging
+     * can disturb the power rail. The charging PMIC is already awake, so a
+     * direct mux session is sufficient. Probe only the channel that has
+     * charger voltage; touching an empty channel can wedge i2c-ng. */
+    uint8_t chs[2];
+    int n = 0;
+    if (monitor.get(CH_C1).voltage > 3.7f) chs[n++] = 0;
+    if (monitor.get(CH_C2).voltage > 3.7f) chs[n++] = 1;
+    if (n == 0) return false;
+
     bool any = false;
-    for (uint8_t ch = 0; ch < 2; ch++) {
-        if (!ipman.present(ch)) continue;
+    for (int i = 0; i < n; i++) {
+        uint8_t ch = chs[i];
         if (!ipman.begin(ch)) continue;
         ipman.current().enableCharger(false);
         ipman.end();
@@ -603,9 +629,10 @@ void App::monitorLoop() {
      * lightweight fallback re-probe here if SYS wasn't found yet. */
     vTaskDelay(pdMS_TO_TICKS(400));
     if (!monitor.present(CH_SYS)) monitor.begin();
-    /* Probe the mux once on the settled bus, then seed IP5356 presence. */
+    /* Probe the mux once on the settled bus. Do NOT probe the IP5356
+     * channels at boot: an empty/standby mux channel can wedge the C6
+     * i2c-ng driver. IPs are probed on demand (screen4, wakeup, CLI). */
     if (!mux.isPresent()) mux.begin();
-    ipman.begin();
     mux.setMask(0);
     /* Re-read FRAM config now that the i2c-ng bus has settled (deep-sleep wake).
      * If still invalid/uninitialized, write defaults once. Restore the light
@@ -614,6 +641,7 @@ void App::monitorLoop() {
         persist_defaults(fram.data());
         fram.save();
     }
+    loadOvpCutoff();
     applyActivityTimeout(fram.data().activityTimeoutSec);
     m_lightSelect = s_lightRegime ? s_lightRegime          /* RTC memory first (deep-sleep) */
                   : (fram.data().lightPercent ? fram.data().lightPercent : 60);
@@ -760,7 +788,7 @@ void App::monitorLoop() {
                 m_chargerAbsentSince = 0;
 
                 if (!m_chargeOvpLatched) {
-                    if (vbat >= BATTERY_OVP_CUTOFF_V) {
+                    if (vbat >= m_ovpCutoffV) {
                         if (!m_ovpSince) m_ovpSince = now;
                         if ((uint32_t)(now - m_ovpSince) >= BATTERY_OVP_DEBOUNCE_MS) {
                             m_chargeOvpLatched = true;
@@ -768,7 +796,7 @@ void App::monitorLoop() {
                             m_ovpTripVoltage = vbat;
                             m_ovpTripMs = now;
                             m_ovpLastAttempt = now;
-                            out.printf("[batt] OVERVOLTAGE %.2f V -> chargers OFF (latched)\r\n", vbat);
+                            out.printf("[batt] OVERVOLTAGE %.2f V >= %.2f V cutoff -> chargers OFF (latched)\r\n", vbat, m_ovpCutoffV);
                             if (!disableChargingIPs())
                                 out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
                         }
