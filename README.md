@@ -25,6 +25,14 @@ BLE UART, activity timeout, and deep/light sleep support.
   <img src="img/apb_photo_bot.jpg" alt="APB assembled bottom view" width="46%">
 </p>
 
+## 🎡 Tests
+
+<p align="right">
+  <img src="img/a1_c2_test.jpg" alt="APB assembled top view" width="46%">
+  <img src="img/c1_c2_test.jpg" alt="APB assembled bottom view" width="46%">
+</p>
+
+
 ## 🏈 Features
 
 - Transparent top cover (3mm acrylic) + 3D printed case
