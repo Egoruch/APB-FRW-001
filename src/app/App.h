@@ -142,6 +142,10 @@ private:
     volatile uint32_t m_lastActivityMs = 0;
     volatile bool m_activityIdle = false;
     volatile bool m_externalActive = false;   /* USB charge/load current flowing */
+    volatile bool m_charging = false;         /* charger input active on C1/C2 */
+    volatile bool m_chargeRgbBlanked = false; /* strip idled by charging timeout */
+    volatile bool m_rgbPulseActive = false;   /* one-shot pulse serialization */
+    uint32_t m_chargeRgbSince = 0;            /* charging indication window start */
     volatile uint8_t m_prevBrightness = 100;
     uint32_t m_activityTimeoutMs = 60000UL;
     void applyActivityTimeout(uint8_t sec);
@@ -159,6 +163,7 @@ private:
     uint32_t m_ovpLastAttempt = 0;
     uint32_t m_chargerAbsentSince = 0;
     bool disableChargingIPs();
+    bool enableChargingIPs();
     void loadOvpCutoff();
     volatile void *m_melodyTask = nullptr;        /* running melody task handle */
     BuzzerNote *m_melodyPack = nullptr;           /* its heap note pack */

@@ -20,6 +20,7 @@ public:
     uint8_t brightness() const { return m_bright; }
 
     void update();  /* run lv_timer_handler; call from UI task only */
+    void notify(const char *msg, uint32_t durationMs = 4000);   /* transient on-screen toast */
     void requestScreenToggle();   /* cycle main <-> screen2 <-> screen3 <-> screen4 on next UI tick */
     void requestScreen(int n);    /* jump directly to screen 1..4 (1=main, 2=monitor, 3=config, 4=IP5356) */
     int  screen() const;          /* current screen number 1..4 */
@@ -60,6 +61,11 @@ private:
     bool m_ready = false;
     uint8_t m_bright = 100;
     bool m_blPending = true;   /* keep backlight off until the first frame renders */
+    lv_obj_t *m_toast = nullptr;          /* transient notification label (top layer) */
+    volatile bool m_toastPending = false;
+    char m_toastMsg[48] = "";
+    uint32_t m_toastUntil = 0;
+    uint32_t m_toastDur = 4000;
     lv_obj_t *m_bt[3] = {nullptr, nullptr, nullptr};   /* Bluetooth/Berkanan rune lines */
 
     /* screens */

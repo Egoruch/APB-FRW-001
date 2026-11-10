@@ -193,6 +193,43 @@ bool FRAM::ovpSave(uint16_t mv) {
     return ok;
 }
 
+/* Per-port session-energy mode at 0x0210 (separate from config and OVP). */
+#define FRAM_SESSION_OFFSET 0x0210u
+#define FRAM_SESSION_MAGIC  0x53455353u   /* "SESS" */
+#define FRAM_SESSION_LEN    12u
+
+bool FRAM::sessionLoad(bool &on) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_SESSION_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_SESSION_OFFSET, (byte)FRAM_SESSION_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&crc, b + 8, 4);
+    if (magic != FRAM_SESSION_MAGIC) return false;
+    if (crc != persist_crc32(b, 8)) return false;
+    on = (b[4] != 0);
+    return true;
+}
+
+bool FRAM::sessionSave(bool on) {
+    if (!m_present) return false;
+    uint8_t b[FRAM_SESSION_LEN];
+    uint32_t magic = FRAM_SESSION_MAGIC;
+    uint32_t crc;
+    memset(b, 0, sizeof(b));
+    memcpy(b, &magic, 4);
+    b[4] = on ? 1 : 0;
+    crc = persist_crc32(b, 8);
+    memcpy(b + 8, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_SESSION_OFFSET, (byte)FRAM_SESSION_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
 void FRAM::save() {
     if (!m_present) return;
     bool saved = false;

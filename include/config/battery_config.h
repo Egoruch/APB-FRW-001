@@ -30,6 +30,14 @@
 /* How often accumulated counters are flushed to FRAM (ms) - wear conscious */
 #define BATTERY_FRAM_FLUSH_MS 15000
 
+/* Per-port session energy (optional, enabled by default): zero the port's
+ * Wh/mAh counters when anything connects to the port (load or charger), keep
+ * the last value after disconnection until the next connection. */
+#define PORT_SESSION_ON_A          0.03f    /* |I| that starts a session */
+#define PORT_SESSION_OFF_A         0.015f   /* below this the port counts as idle */
+#define PORT_SESSION_DEBOUNCE_MS   500UL    /* load must persist before resetting */
+#define PORT_SESSION_ABSENT_MS     1500UL   /* idle time before re-arming */
+
 /* Internal resistance safety checks */
 #define RESISTANCE_MIN_CELL_VOLTAGE 2.50f    /* abort if V0 < this */
 #define RESISTANCE_MAX_LOAD_A       40.0f

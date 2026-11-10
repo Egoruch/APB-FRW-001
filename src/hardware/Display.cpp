@@ -146,9 +146,45 @@ void Display::setBrightness(uint8_t pct) {
         ledcWrite(PIN_DPL_PWM, (uint32_t)(pct * 255UL / 100UL));
 }
 
+void Display::notify(const char *msg, uint32_t durationMs) {
+    /* called from other tasks: only buffer the text; the UI task renders it */
+    if (!msg) msg = "";
+    size_t i = 0;
+    for (; i + 1 < sizeof(m_toastMsg) && msg[i]; i++) m_toastMsg[i] = msg[i];
+    m_toastMsg[i] = 0;
+    m_toastDur = durationMs;
+    m_toastPending = true;
+}
+
 void Display::update() {
     if (!m_ready) return;
     lv_timer_handler();
+
+    /* transient notification toast on the top layer */
+    if (m_toastPending) {
+        m_toastPending = false;
+        if (!m_toast) {
+            m_toast = lv_label_create(lv_layer_top());
+            lv_obj_set_style_bg_color(m_toast, lv_color_hex(0x0F172A), 0);
+            lv_obj_set_style_bg_opa(m_toast, 235, 0);
+            lv_obj_set_style_border_width(m_toast, 1, 0);
+            lv_obj_set_style_border_color(m_toast, lv_color_hex(0x00E676), 0);
+            lv_obj_set_style_radius(m_toast, 6, 0);
+            lv_obj_set_style_pad_all(m_toast, 6, 0);
+            lv_obj_set_style_text_font(m_toast, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(m_toast, lv_color_hex(0x00E676), 0);
+            lv_obj_align(m_toast, LV_ALIGN_BOTTOM_MID, 0, -10);
+        }
+        lv_label_set_text(m_toast, m_toastMsg);
+        lv_obj_remove_flag(m_toast, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(m_toast);
+        m_toastUntil = millis() + m_toastDur;
+    }
+    if (m_toast && !lv_obj_has_flag(m_toast, LV_OBJ_FLAG_HIDDEN) &&
+        (int32_t)(millis() - m_toastUntil) >= 0) {
+        lv_obj_add_flag(m_toast, LV_OBJ_FLAG_HIDDEN);
+    }
+
     if (m_switchReq) {
         m_switchReq = false;
         lv_screen_load(m_onScreen3 ? m_screen3 : (m_onScreen2 ? m_screen2 : (m_onScreen4 ? m_screen4 : m_screen1)));
@@ -322,7 +358,7 @@ void Display::updateScreen2() {
 typedef struct { const char *name; const char *cmd; } CfgItem;
 static const CfgItem kCfg[] = {
     {"clr","clr"}, {"display",NULL}, {"timeout","timeout"},
-    {"energy","energy battery set"}, {"light","light",},
+    {"energy","energy battery set"}, {"port Wh","energy session"}, {"light","light",},
     {"test","test"}, {"temperature","temperature all"}, {"i2c","i2c scan"}, {"version","version"}, {"id","id"},
     {"uptime","uptime"}, {"monitor","monitor all"}, {"mcu","mcu"},
     {"battery","battery"}, {"ovp","battery ovp set"}, {"buzzer","buzzer"}, {"eload","eload status"},
@@ -343,6 +379,7 @@ static bool isMcu(int i)  { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].nam
 static bool isMelody(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "melody") == 0; }
 static bool isBuzzer(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "buzzer") == 0; }
 static bool isEnergy(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "energy") == 0; }
+static bool isPortEnergy(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "port Wh") == 0; }
 static bool isOvp(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "ovp") == 0; }
 static bool isFram(int i) { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "fram") == 0; }
 static bool isRgb(int i)  { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "rgb") == 0; }
@@ -350,7 +387,7 @@ static bool isLight(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].nam
 static bool isScreen(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "screen") == 0; }
 static bool isRtc(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "rtc") == 0; }
 static bool isLog(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "log") == 0; }
-static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i); }
+static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i)||isPortEnergy(i); }
 
 /* subcommand list for list-type items */
 static const char *const *subList(int i, int *n) {
@@ -363,6 +400,7 @@ static const char *const *subList(int i, int *n) {
     static const char *const subScreen[4] = {"1","2","3","4"};
     static const char *const subRtc[4]    = {"get","source ext","source soft","raw"};
     static const char *const subTimeout[5] = {"off","30","60","120","180"};
+    static const char *const subPortEnergy[3] = {"status","on","off"};
     static const char *const subLog[7] = {"status","enable","disable","level error","level warn","level info","level debug"};
     if (isMcu(i))     { *n = 6; return subMcu; }
     if (isMelody(i))  { *n = 3; return subMelody; }
@@ -373,6 +411,7 @@ static const char *const *subList(int i, int *n) {
     if (isScreen(i))  { *n = 4; return subScreen; }
     if (isRtc(i))     { *n = 4; return subRtc; }
     if (isTimeout(i)) { *n = 5; return subTimeout; }
+    if (isPortEnergy(i)) { *n = 3; return subPortEnergy; }
     if (isLog(i))     { *n = 7; return subLog; }
     *n = 0; return nullptr;
 }
@@ -492,6 +531,8 @@ void Display::updateScreen3() {
                 else snprintf(b, sizeof(b), "%s timeout %us", (i == m_cfgSel ? ">" : " "), ts);
             }
             else if (isLight(i))  snprintf(b, sizeof(b), "%s light %u%%", (i == m_cfgSel ? ">" : " "), (unsigned)(m_app ? m_app->light() : 0));
+            else if (isPortEnergy(i)) snprintf(b, sizeof(b), "%s port Wh %s", (i == m_cfgSel ? ">" : " "),
+                                              (m_app && m_app->energy.sessionEnabled()) ? "ON" : "off");
             else if (isEnergy(i)) snprintf(b, sizeof(b), "%s energy %.1f Wh", (i == m_cfgSel ? ">" : " "), m_cfgNum);
             else if (isOvp(i)) {
                 float v = (m_cfgActive && i == m_cfgSel) ? m_cfgNum

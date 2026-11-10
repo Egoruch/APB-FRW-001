@@ -114,7 +114,7 @@ void App::begin() {
     LOG_INFO("%s firmware %s (%s)", FW_NAME, FW_VERSION, FW_BUILD);
 }
 
-/* Non-blocking boot sequence: beep-beep + magenta glow, run as a background
+/* Non-blocking boot sequence: beep-beep + light blue glow, run as a background
  * task so it does not block setup and so the buzzer/RGB auto-managers (which
  * live in other tasks) keep working in parallel. */
 bool App::enterDeepSleep() {    /* Refuse if MCU_WAKE is already active - several beeps as feedback */
@@ -142,6 +142,16 @@ bool App::enterDeepSleep() {    /* Refuse if MCU_WAKE is already active - severa
 }
 
 void App::bootSequence() {
+    /* Charger present: skip the boot show entirely. A brownout reset while
+     * charging would otherwise loop beeps + glow, which reads as a constantly
+     * lit strip (SK6812 pixels hold the last colour across the reset). */
+    monitor.sampleChannel(CH_C1);
+    monitor.sampleChannel(CH_C2);   /* fresh read: monitor task may not have run yet */
+    if (monitor.get(CH_C1).voltage > 3.7f || monitor.get(CH_C2).voltage > 3.7f) {
+        rgb.off();
+        return;
+    }
+
     buzzer.setFrequency(2000);
 
     /* Beep-beep first (real 2 kHz PWM tone from the Buzzer driver). No NeoPixel
@@ -285,6 +295,10 @@ bool App::markActivityWoke() {
     uint8_t b = m_prevBrightness ? m_prevBrightness : DISP_BL_DEFAULT;
     display.setBrightness(b);
     rgb.setIdle(false);
+    if (m_chargeRgbBlanked) {               /* restart the charging indication window */
+        m_chargeRgbBlanked = false;
+        m_chargeRgbSince = millis();
+    }
     Serial.println("[ui] activity -> wake");
     return true;
 }
@@ -593,13 +607,21 @@ void App::rgbPulseTask(void *p) {
     rgb.setEffect(prevEff);
     if (prevEff == LED_EFFECT_OFF) rgb.off(); else rgb.setOn();
     Serial.println("[rgb] pulse done");
+    c->a->m_rgbPulseActive = false;
     delete c;
     vTaskDelete(NULL);
 }
 
 void App::rgbPulse(uint8_t r, uint8_t g, uint8_t b) {
+    /* Serialize: overlapping pulse tasks restore stale effect/colour state and
+     * can latch a constant SOLID colour on the strip. */
+    if (m_rgbPulseActive) return;
+    m_rgbPulseActive = true;
     PulseCtx *c = new PulseCtx{this, r, g, b};
-    xTaskCreate(rgbPulseTask, "rgbpulse", 4096, c, 2, NULL);
+    if (xTaskCreate(rgbPulseTask, "rgbpulse", 4096, c, 2, NULL) != pdPASS) {
+        m_rgbPulseActive = false;
+        delete c;
+    }
 }
 
 bool App::disableChargingIPs() {
@@ -618,6 +640,26 @@ bool App::disableChargingIPs() {
         uint8_t ch = chs[i];
         if (!ipman.begin(ch)) continue;
         ipman.current().enableCharger(false);
+        ipman.end();
+        any = true;
+    }
+    return any;
+}
+
+bool App::enableChargingIPs() {
+    /* Counterpart of disableChargingIPs: restore charging on USB-C inputs
+     * after an OVP cutoff, once the latch is clear (new insertion / boot). */
+    uint8_t chs[2];
+    int n = 0;
+    if (monitor.get(CH_C1).voltage > 3.7f) chs[n++] = 0;
+    if (monitor.get(CH_C2).voltage > 3.7f) chs[n++] = 1;
+    if (n == 0) return false;
+
+    bool any = false;
+    for (int i = 0; i < n; i++) {
+        uint8_t ch = chs[i];
+        if (!ipman.begin(ch)) continue;
+        ipman.current().enableCharger(true);
         ipman.end();
         any = true;
     }
@@ -689,12 +731,23 @@ void App::monitorLoop() {
         {
             static bool prevChg = false;
             static bool prevLd  = false;
+            static uint32_t lastConnectPulseMs = 0;   /* re-arm window vs current flicker */
+            uint32_t detNow = millis();
             float vc = monitor.get(CH_C1).voltage;
             if (monitor.get(CH_C2).voltage > vc) vc = monitor.get(CH_C2).voltage;
             float ic = (monitor.get(CH_C1).current < 0 ? -monitor.get(CH_C1).current : monitor.get(CH_C1).current)
                      + (monitor.get(CH_C2).current < 0 ? -monitor.get(CH_C2).current : monitor.get(CH_C2).current);
             bool chg = (vc >= 1.0f) && (ic > 0.05f);
+            m_charging = chg;
             if (chg && !prevChg) {
+                /* New USB-C source: the PMIC may still hold En_Charger=0 from
+                 * a previous OVP cutoff. Restore charging unless OVP is
+                 * latched (an actual over-voltage condition persists). */
+                if (!m_chargeOvpLatched && enableChargingIPs())
+                    Serial.println("[batt] charger connected -> charging enabled");
+            }
+            if (chg && !prevChg && (uint32_t)(detNow - lastConnectPulseMs) >= 5000UL) {
+                lastConnectPulseMs = detNow;
                 Serial.println("[det] charger connected -> emerald pulse");
                 rgbPulse(0, 200, 120);
             }
@@ -705,7 +758,8 @@ void App::monitorLoop() {
             float ia = (monitor.get(CH_A1).current < 0 ? -monitor.get(CH_A1).current : monitor.get(CH_A1).current)
                      + (monitor.get(CH_A2).current < 0 ? -monitor.get(CH_A2).current : monitor.get(CH_A2).current);
             bool ld = (va >= 3.0f) && (ia > 0.05f);
-            if (ld && !prevLd) {
+            if (ld && !prevLd && (uint32_t)(detNow - lastConnectPulseMs) >= 5000UL) {
+                lastConnectPulseMs = detNow;
                 Serial.println("[det] load connected -> orange-yellow pulse");
                 rgbPulse(255, 190, 40);
             }
@@ -803,9 +857,13 @@ void App::monitorLoop() {
                     } else {
                         m_ovpSince = 0;
                     }
-                } else if (batCurrent() < -0.05f &&
+                } else if ((monitor.get(CH_C1).current > 0.05f ||
+                            monitor.get(CH_C2).current > 0.05f) &&
                            (uint32_t)(now - m_ovpLastAttempt) >= 2000UL) {
-                    /* The PMIC may re-enable charging after a reset/insertion. */
+                    /* The PMIC may re-enable charging after a reset/insertion.
+                     * Only USB-C input current may trigger this: a USB-A load
+                     * also discharges the pack (negative batCurrent) but must
+                     * not be disturbed by OVP. */
                     m_ovpLastAttempt = now;
                     out.println("[batt] OVP: charger re-enabled -> forcing OFF again");
                     if (!disableChargingIPs())
@@ -958,6 +1016,18 @@ void App::systemLoop() {
     for (;;) {
         buzzer.update();
         if (!m_bootRgbActive) rgb.update();   /* avoid double-driving the strip during boot fade */
+
+        /* port session reset notice -> transient on-screen toast */
+        {
+            char p[4];
+            float oldWh = 0;
+            if (energy.takeResetNotice(p, sizeof(p), oldWh)) {
+                char msg[48];
+                snprintf(msg, sizeof(msg), "%s %.2f Wh cleared", p, oldWh);
+                display.notify(msg, 4000);
+            }
+        }
+
         if (m_externalActive) {
             /* Charging or powering a USB load counts as active use. */
             if (m_activityIdle) markActivity();
@@ -969,6 +1039,26 @@ void App::systemLoop() {
             display.setBrightness(0);
             rgb.setIdle(true);
             Serial.println("[ui] activity timeout -> display/RGB off");
+        }
+
+        /* Charging indication timeout: charging keeps m_externalActive true, so
+         * without this the strip would stay lit forever while charging. After
+         * RGB_CHARGE_INDICATION_MS force the strip idle (low-battery/warning
+         * still show). Charger removal or user activity restarts the window. */
+        if (m_charging) {
+            if (!m_chargeRgbSince) m_chargeRgbSince = millis();
+            if (!m_chargeRgbBlanked && !m_activityIdle &&
+                (uint32_t)(millis() - m_chargeRgbSince) >= RGB_CHARGE_INDICATION_MS) {
+                rgb.setIdle(true);
+                m_chargeRgbBlanked = true;
+                Serial.println("[rgb] charging indication timeout -> RGB idle");
+            }
+        } else {
+            m_chargeRgbSince = 0;
+            if (m_chargeRgbBlanked) {
+                m_chargeRgbBlanked = false;
+                if (!m_activityIdle) rgb.setIdle(false);   /* hand the strip back */
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }

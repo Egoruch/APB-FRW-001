@@ -27,6 +27,24 @@ static void cmdEnergy(Output &out, const std::vector<String> &a) {
     if (sub == "all") {
         out.println("Energy counters:");
         for (int i = CH_BAT; i <= CH_A2; i++) printOne(out, (PowerChannel)i);
+        out.printf("session: %s\r\n", app.energy.sessionEnabled() ? "ON" : "off");
+        out.println("OK");
+        return;
+    }
+    if (sub == "session") {
+        if (a.size() >= 3) {
+            String v = a[2];
+            v.toLowerCase();
+            if (v == "on" || v == "off" || v == "1" || v == "0") {
+                bool on = (v == "on" || v == "1");
+                app.energy.setSessionEnabled(on);
+                out.printf("OK port session energy %s\r\n", on ? "ON" : "off");
+                return;
+            }
+            out.println("ERROR session on|off");
+            return;
+        }
+        out.printf("Port session energy: %s\r\n", app.energy.sessionEnabled() ? "ON" : "off");
         out.println("OK");
         return;
     }
@@ -44,12 +62,12 @@ static void cmdEnergy(Output &out, const std::vector<String> &a) {
         return;
     }
     PowerChannel ch = portToCh(sub);
-    if (ch == CH_COUNT) { out.println("usage: energy <c1|c2|a1|a2|battery|sys|all|reset>"); return; }
+    if (ch == CH_COUNT) { out.println("usage: energy <c1|c2|a1|a2|battery|sys|all|reset|session>"); return; }
     printOne(out, ch);
     out.println("OK");
 }
 
 void cmdRegisterEnergy(CliEngine &cli, App &app) {
     (void)app;
-    cli.registerCommand("energy", "Port charge/energy counters", "energy <c1|c2|a1|a2|battery|sys|all|reset>", cmdEnergy);
+    cli.registerCommand("energy", "Port charge/energy counters", "energy <c1|c2|a1|a2|battery|sys|all|reset|session>", cmdEnergy);
 }

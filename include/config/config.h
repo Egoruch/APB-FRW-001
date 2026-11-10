@@ -41,3 +41,8 @@
 
 /* Display/RGB inactivity blanking */
 #define ACTIVITY_TIMEOUT_MS     60000UL
+
+/* Charging keeps the UI awake (m_externalActive), which would otherwise let a
+ * lit RGB effect run forever. Cap the strip indication while charging; the
+ * strip goes idle after this window (warnings/low-battery still show). */
+#define RGB_CHARGE_INDICATION_MS 600000UL   /* 10 min */

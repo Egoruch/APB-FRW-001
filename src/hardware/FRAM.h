@@ -40,6 +40,11 @@ public:
     bool ovpLoad(uint16_t &mv);
     bool ovpSave(uint16_t mv);
 
+    /* Per-port session-energy mode, stored separately from the config block
+     * (defaults to ON when no valid record exists). */
+    bool sessionLoad(bool &on);
+    bool sessionSave(bool on);
+
     void erase();   /* writes 0xFF to whole device (config reinitialized) */
 
     uint16_t capacity() const { return m_cap; }
