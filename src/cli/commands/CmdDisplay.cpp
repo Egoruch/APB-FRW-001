@@ -41,10 +41,27 @@ static void cmdDisplay(Output &out, const std::vector<String> &a) {
         }
         return;
     }
-    out.println("usage: display brightness <get|set 0-100> | display screen <1|2|3|4> | display status");
+    if (sub == "stats") {
+        if (a.size() >= 3) {
+            String op = a[2];
+            op.toLowerCase();
+            if (op == "on" || op == "off" || op == "1" || op == "0") {
+                bool on = (op == "on" || op == "1");
+                app.display.setShowStats(on);
+                out.printf("OK FPS/CPU overlay %s\r\n", on ? "ON" : "off");
+                return;
+            }
+            out.println("ERROR stats on|off");
+            return;
+        }
+        out.printf("FPS/CPU overlay: %s\r\n", app.display.showStats() ? "ON" : "off");
+        out.println("OK");
+        return;
+    }
+    out.println("usage: display brightness <get|set 0-100> | display screen <1|2|3|4> | display stats <on|off> | display status");
 }
 
 void cmdRegisterDisplay(CliEngine &cli, App &app) {
     (void)app;
-    cli.registerCommand("display", "Display control", "display <status|brightness <get|set 0-100>|screen <1-4>>", cmdDisplay);
+    cli.registerCommand("display", "Display control", "display <status|brightness <get|set 0-100>|screen <1-4>|stats <on|off>>", cmdDisplay);
 }

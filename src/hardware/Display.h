@@ -20,11 +20,23 @@ public:
     uint8_t brightness() const { return m_bright; }
 
     void update();  /* run lv_timer_handler; call from UI task only */
-    void notify(const char *msg, uint32_t durationMs = 4000);   /* transient on-screen toast */
+    void notify(const char *title, const char *value, uint32_t durationMs = 4500,
+                uint32_t color = 0x22C55E);
     void requestScreenToggle();   /* cycle main <-> screen2 <-> screen3 <-> screen4 on next UI tick */
     void requestScreen(int n);    /* jump directly to screen 1..4 (1=main, 2=monitor, 3=config, 4=IP5356) */
     int  screen() const;          /* current screen number 1..4 */
     bool isOnConfig() const { return m_onScreen3; }
+
+    /* Screen1 FPS/CPU overlay (optional, off by default) */
+    bool showStats() const { return m_showStats; }
+    void setShowStats(bool on);
+
+    /* Screen2 port selection: BUT3 cycles none->top->bottom; BUT1/BUT2 change
+     * the selected half's port (top and bottom can never be the same). */
+    uint8_t s2Selection() const { return m_s2Sel; }
+    void s2SelectNext();
+    void s2PortPrev();
+    void s2PortNext();
 
     /* Screen4 (IP5356) controls */
     bool isOnScreen4() const { return m_onScreen4; }
@@ -61,11 +73,15 @@ private:
     bool m_ready = false;
     uint8_t m_bright = 100;
     bool m_blPending = true;   /* keep backlight off until the first frame renders */
-    lv_obj_t *m_toast = nullptr;          /* transient notification label (top layer) */
+    lv_obj_t *m_toastBox = nullptr;       /* transient notification banner (top layer) */
+    lv_obj_t *m_toastTitle = nullptr;
+    lv_obj_t *m_toastVal = nullptr;
     volatile bool m_toastPending = false;
-    char m_toastMsg[48] = "";
+    char m_toastTitleMsg[20] = "";
+    char m_toastValMsg[40] = "";
     uint32_t m_toastUntil = 0;
-    uint32_t m_toastDur = 4000;
+    uint32_t m_toastDur = 4500;
+    uint32_t m_toastColor = 0x22C55E;
     lv_obj_t *m_bt[3] = {nullptr, nullptr, nullptr};   /* Bluetooth/Berkanan rune lines */
 
     /* screens */
@@ -78,6 +94,16 @@ private:
     lv_obj_t *m_s2c1V=nullptr, *m_s2c1A=nullptr, *m_s2c1W=nullptr, *m_s2c1Wh=nullptr;
     lv_obj_t *m_s2soc=nullptr, *m_s2fill=nullptr, *m_s2batWh=nullptr;
     lv_obj_t *m_s2lblA2=nullptr, *m_s2lblC1=nullptr;
+    PowerChannel m_s2Top = CH_A1;     /* screen2 top/bottom port selection */
+    PowerChannel m_s2Bot = CH_C2;
+    uint8_t m_s2Sel = 0;              /* 0 none, 1 top, 2 bottom */
+    uint32_t m_s2SelUntil = 0;        /* auto-clear selection */
+    bool m_showStats = false;
+    lv_obj_t *m_statsLbl = nullptr;   /* screen1 FPS/CPU overlay */
+    float m_fps = 0;
+    float m_cpu = 0;
+    void s2StepPort(int dir);
+    void saveUiPrefs();
 
     /* screen3 config menu + terminal */
     lv_obj_t *m_screen3 = nullptr;    lv_obj_t *m_cfgItems[64] = {nullptr};

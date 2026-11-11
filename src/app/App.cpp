@@ -415,6 +415,19 @@ void App::onButtonEvent(const char *event, uint8_t idx) {
     }
 
     if (ev == "click") {
+        /* Screen2: BUT3 cycles top/bottom selection; while active BUT1/BUT2
+         * change the selected half's port. */
+        if (display.screen() == 2 && idx == 2) {
+            display.s2SelectNext();
+            buzzer.beep(40);
+            return;
+        }
+        if (display.screen() == 2 && display.s2Selection() != 0 &&
+            (idx == 0 || idx == 1)) {
+            if (idx == 0) display.s2PortPrev(); else display.s2PortNext();
+            buzzer.beep(40);
+            return;
+        }
         if (idx == 3) {                 /* BUT4 short: flashlight on/off */
             button4Click();
         } else if (idx == 0) {          /* BUT1 OK (was BUT3): short beep */
@@ -639,7 +652,14 @@ bool App::disableChargingIPs() {
     for (int i = 0; i < n; i++) {
         uint8_t ch = chs[i];
         if (!ipman.begin(ch)) continue;
-        ipman.current().enableCharger(false);
+        IP5356 &s = ipman.current();
+        /* En_Charger=0 also drops the output MOS (USB-A ports on the same
+         * PMIC), so remember whether any output was live and re-arm it.
+         * setOutputsMos() is the only reliable re-arm for VOUT1/VOUT2. */
+        bool outOn = s.isOutputEnabled(IP5356::Port::VOUT1) ||
+                     s.isOutputEnabled(IP5356::Port::VOUT2);
+        s.enableCharger(false);
+        if (outOn) s.setOutputsMos(true);
         ipman.end();
         any = true;
     }
@@ -659,7 +679,12 @@ bool App::enableChargingIPs() {
     for (int i = 0; i < n; i++) {
         uint8_t ch = chs[i];
         if (!ipman.begin(ch)) continue;
-        ipman.current().enableCharger(true);
+        IP5356 &s = ipman.current();
+        s.enableCharger(true);
+        /* Re-detect/open the loaded USB ports: disabling the charger on this
+         * PMIC also drops its output MOS, so an attached USB-A load needs the
+         * re-detect sequence to come back automatically. */
+        s.setOutputsMos(true);
         ipman.end();
         any = true;
     }
@@ -739,13 +764,16 @@ void App::monitorLoop() {
                      + (monitor.get(CH_C2).current < 0 ? -monitor.get(CH_C2).current : monitor.get(CH_C2).current);
             bool chg = (vc >= 1.0f) && (ic > 0.05f);
             m_charging = chg;
-            if (chg && !prevChg) {
-                /* New USB-C source: the PMIC may still hold En_Charger=0 from
-                 * a previous OVP cutoff. Restore charging unless OVP is
-                 * latched (an actual over-voltage condition persists). */
-                if (!m_chargeOvpLatched && enableChargingIPs())
-                    Serial.println("[batt] charger connected -> charging enabled");
+            /* Charger presence is voltage-based: with En_Charger=0 the port
+             * draws no current, so a current edge would never re-enable it. */
+            static bool prevSrcPresent = false;
+            bool srcPresent = (monitor.get(CH_C1).voltage >= 3.7f) ||
+                              (monitor.get(CH_C2).voltage >= 3.7f);
+            if (srcPresent && !prevSrcPresent && !m_chargeOvpLatched) {
+                if (enableChargingIPs())
+                    Serial.println("[batt] charger present -> charging enabled");
             }
+            prevSrcPresent = srcPresent;
             if (chg && !prevChg && (uint32_t)(detNow - lastConnectPulseMs) >= 5000UL) {
                 lastConnectPulseMs = detNow;
                 Serial.println("[det] charger connected -> emerald pulse");
@@ -868,6 +896,49 @@ void App::monitorLoop() {
                     out.println("[batt] OVP: charger re-enabled -> forcing OFF again");
                     if (!disableChargingIPs())
                         out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
+                }
+            }
+        }
+        /* pack charging session notifications: amber on start, green Wh on stop */
+        {
+            uint32_t cnow = millis();
+            bool into = batCurrent() < -0.10f;   /* negative = into the pack */
+            if (!m_chargeRpt) {
+                if (into) {
+                    if (!m_chargeEdgeMs) m_chargeEdgeMs = cnow;
+                    else if ((uint32_t)(cnow - m_chargeEdgeMs) >= 1000UL) {
+                        m_chargeRpt = true;
+                        m_chargeEdgeMs = 0;
+                        m_chargeLastMs = cnow;
+                        m_chargeWh = 0.0f;
+                        char val[12];
+                        snprintf(val, sizeof(val), "%.0f%%", batSOC());
+                        display.notify("CHARGING", val, 4500, 0xF59E0B);
+                        Serial.printf("[batt] charging started (%s)\r\n", val);
+                    }
+                } else {
+                    m_chargeEdgeMs = 0;
+                }
+            } else {
+                float dt = (float)(cnow - m_chargeLastMs) / 1000.0f;
+                if (dt > 2.0f) dt = 2.0f;        /* tolerate scheduling gaps */
+                m_chargeLastMs = cnow;
+                float pin = -batPower();         /* positive while charging */
+                if (pin > 0.0f) m_chargeWh += pin * dt / 3600.0f;
+                if (batCurrent() > -0.03f) {
+                    if (!m_chargeEdgeMs) m_chargeEdgeMs = cnow;
+                    else if ((uint32_t)(cnow - m_chargeEdgeMs) >= 2000UL) {
+                        m_chargeRpt = false;
+                        m_chargeEdgeMs = 0;
+                        if (m_chargeWh >= 0.01f) {
+                            char val[16];
+                            snprintf(val, sizeof(val), "%.2f Wh", m_chargeWh);
+                            display.notify("CHARGED", val, 4500, 0x22C55E);
+                            Serial.printf("[batt] charging stopped, session %s\r\n", val);
+                        }
+                    }
+                } else {
+                    m_chargeEdgeMs = 0;
                 }
             }
         }
@@ -1017,14 +1088,19 @@ void App::systemLoop() {
         buzzer.update();
         if (!m_bootRgbActive) rgb.update();   /* avoid double-driving the strip during boot fade */
 
-        /* port session reset notice -> transient on-screen toast */
+        /* port session notices -> transient on-screen banner */
         {
             char p[4];
-            float oldWh = 0;
-            if (energy.takeResetNotice(p, sizeof(p), oldWh)) {
-                char msg[48];
-                snprintf(msg, sizeof(msg), "%s %.2f Wh cleared", p, oldWh);
-                display.notify(msg, 4000);
+            float wh = 0;
+            bool disconnected = false;
+            if (energy.takePortNotice(p, sizeof(p), wh, disconnected)) {
+                char title[20];
+                char val[24];
+                snprintf(title, sizeof(title), "%s %s", p,
+                         disconnected ? "DELIVERED" : "CLEARED");
+                snprintf(val, sizeof(val), "%.2f Wh", wh);
+                display.notify(title, val, 4500,
+                               disconnected ? 0x22C55E : 0xF59E0B);
             }
         }
 

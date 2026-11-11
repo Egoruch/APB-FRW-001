@@ -17,10 +17,11 @@ void EnergyManager::setSessionEnabled(bool on) {
     m_fram.sessionSave(on);
 }
 
-bool EnergyManager::takeResetNotice(char *port, size_t n, float &oldWh) {
+bool EnergyManager::takePortNotice(char *port, size_t n, float &wh, bool &disconnected) {
     if (!m_noticePending) return false;
     m_noticePending = false;
-    oldWh = m_noticeWh;
+    wh = m_noticeWh;
+    disconnected = m_noticeDisconnect;
     if (n) {
         size_t i = 0;
         for (; i + 1 < n && m_noticePort[i]; i++) port[i] = m_noticePort[i];
@@ -56,6 +57,7 @@ void EnergyManager::updatePortSessions(uint32_t now) {
          * the port (outflow) and a charger feeding the pack (inflow). */
         bool loaded = (acur > PORT_SESSION_ON_A);
         if (loaded) {
+            if (cur < -PORT_SESSION_ON_A) m_portWasSource[ch] = true;
             /* load detected: a new device only after it has been absent long
              * enough to re-arm, and the load must persist to count as connect */
             if (!m_portPresent[ch]) {
@@ -63,12 +65,15 @@ void EnergyManager::updatePortSessions(uint32_t now) {
                 if ((uint32_t)(now - m_portLoadSince[ch]) >= PORT_SESSION_DEBOUNCE_MS) {
                     m_portPresent[ch] = true;
                     m_portAbsentSince[ch] = 0;
+                    bool prevSource = m_portWasSource[ch];
+                    m_portWasSource[ch] = false;
                     float oldWh = m_fram.data().energyWh[ch];
                     m_fram.data().energyWh[ch] = 0;
                     m_fram.data().chargeMah[ch] = 0;
                     snprintf(m_noticePort, sizeof(m_noticePort), "%s", kChannelName[ch]);
                     m_noticeWh = oldWh;
-                    m_noticePending = true;
+                    m_noticeDisconnect = false;
+                    m_noticePending = prevSource;   /* only for device sessions */
                     /* normal-mode console line (unconditional) + on-device
                      * terminal pane + debug log */
                     char line[80];
@@ -87,7 +92,22 @@ void EnergyManager::updatePortSessions(uint32_t now) {
                 if ((uint32_t)(now - m_portAbsentSince[ch]) >= PORT_SESSION_ABSENT_MS) {
                     m_portPresent[ch] = false;   /* removed; value stays latched */
                     m_portAbsentSince[ch] = 0;
-                    LOG_INFO("Port %s: device removed (session value kept)", kChannelName[ch]);
+                    bool wasSource = m_portWasSource[ch];
+                    m_portWasSource[ch] = false;
+                    float sessWh = m_fram.data().energyWh[ch];
+                    if (wasSource) {             /* device session, not a charger */
+                        snprintf(m_noticePort, sizeof(m_noticePort), "%s", kChannelName[ch]);
+                        m_noticeWh = sessWh;
+                        m_noticeDisconnect = true;
+                        m_noticePending = true;
+                    }
+                    char line[80];
+                    snprintf(line, sizeof(line),
+                             "[energy] Port %s: device removed, session %.3f Wh",
+                             kChannelName[ch], sessWh);
+                    Serial.print(line); Serial.print("\r\n");
+                    termAppend(line); termAppend("\n");
+                    LOG_INFO("Port %s: device removed (session %.3f Wh kept)", kChannelName[ch], sessWh);
                 }
             } else if (acur >= PORT_SESSION_OFF_A) {
                 m_portAbsentSince[ch] = 0;       /* inside hysteresis band: stay armed */

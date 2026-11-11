@@ -172,6 +172,10 @@ private:
     volatile bool m_eloadAbort = false;           /* cancel request for sweep task */
     volatile bool m_overtemp = false;             /* ELOAD overtemp latch */
     volatile float m_eloadTemp = 0;               /* cached ELOAD temp (0x4A) */
+    bool m_chargeRpt = false;                     /* pack charging session active */
+    uint32_t m_chargeEdgeMs = 0;                  /* start/stop debounce */
+    uint32_t m_chargeLastMs = 0;
+    float m_chargeWh = 0;                         /* energy into pack this session */
 };
 
 

@@ -50,11 +50,27 @@ static void cmdMonitor(Output &out, const std::vector<String> &a) {
             return r > 0.05f ? rail : bat;
         };
         float batP = app.batPower();
+        const PowerMeasurement &c1 = app.monitor.get(CH_C1);
+        const PowerMeasurement &c2 = app.monitor.get(CH_C2);
+        bool c1In = (c1.voltage > 3.7f) && (c1.current > 0.05f);
+        bool c2In = (c2.voltage > 3.7f) && (c2.current > 0.05f);
+        float chgP = -batP; if (chgP < 0.0f) chgP = 0.0f;
+        const PowerMeasurement &a1 = app.monitor.get(CH_A1);
+        const PowerMeasurement &a2 = app.monitor.get(CH_A2);
+        float c1Den = fabsf(c1.power), c2Den = fabsf(c2.power);
+        float outAll = fabsf(a1.power) + fabsf(a2.power);
+        float c1Num = chgP + outAll, c2Num = chgP + outAll;
+        if (c1Num > c1Den) c1Num = c1Den;
+        if (c2Num > c2Den) c2Num = c2Den;
         out.println("Efficiency");
-        out.println("C1  (C1/IP1)     : " + eff(app.monitor.get(CH_C1).power, effDen(app.monitor.get(CH_IP1).power, batP)));
-        out.println("C2  (C2/IP1)     : " + eff(app.monitor.get(CH_C2).power, effDen(app.monitor.get(CH_IP1).power, batP)));
-        out.println("A1  (A1/IP2)     : " + eff(app.monitor.get(CH_A1).power, effDen(app.monitor.get(CH_IP2).power, batP)));
-        out.println("A2  (A2/IP2)     : " + eff(app.monitor.get(CH_A2).power, effDen(app.monitor.get(CH_IP2).power, batP)));
+        out.println("C1  (in: total)  : " + eff(c1In ? c1Num : c1.power,
+                         c1In ? c1Den : effDen(app.monitor.get(CH_IP1).power, batP)));
+        out.println("C2  (in: total)  : " + eff(c2In ? c2Num : c2.power,
+                         c2In ? c2Den : effDen(app.monitor.get(CH_IP2).power, batP)));
+        out.println("A1  (A1/C1 pass) : " + eff(a1.power,
+                         c1In ? c1Den : effDen(app.monitor.get(CH_IP1).power, batP)));
+        out.println("A2  (A2/C2 pass) : " + eff(a2.power,
+                         c2In ? c2Den : effDen(app.monitor.get(CH_IP2).power, batP)));
         out.println("OK");
         return;
     }

@@ -70,6 +70,17 @@ static uint32_t my_tick(void) { return millis(); }
 void Display::begin(App &app) {
     m_app = &app;
 
+    /* restore screen2 port layout + FPS/CPU overlay preference */
+    {
+        uint8_t top = CH_A1, bot = CH_C2, st = 0;
+        if (app.fram.uiPrefsLoad(top, bot, st)) {
+            if (top >= CH_C1 && top <= CH_A2) m_s2Top = (PowerChannel)top;
+            if (bot >= CH_C1 && bot <= CH_A2) m_s2Bot = (PowerChannel)bot;
+            if (m_s2Top == m_s2Bot) m_s2Bot = (m_s2Top == CH_A1) ? CH_A2 : CH_A1;
+            m_showStats = (st != 0);
+        }
+    }
+
     /* backlight (GPIO21) as LEDC PWM, held OFF until the first frame renders */
     ledcAttachChannel(PIN_DPL_PWM, 5000, 8, DISP_BL_LEDC_CH);
     ledcWrite(PIN_DPL_PWM, 0);
@@ -133,6 +144,15 @@ void Display::begin(App &app) {
     buildBluetoothIcon();
     buildScreen3();
     buildScreen4();
+
+    /* screen1 bottom-right FPS/CPU overlay (hidden unless enabled) */
+    m_statsLbl = lv_label_create(m_screen1);
+    lv_label_set_text(m_statsLbl, "");
+    lv_obj_align(m_statsLbl, LV_ALIGN_BOTTOM_RIGHT, -4, -2);
+    lv_obj_set_style_text_font(m_statsLbl, &font_tiny_data, 0);
+    lv_obj_set_style_text_color(m_statsLbl, lv_color_hex(0x64748B), 0);
+    if (!m_showStats) lv_obj_add_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
+
     lv_timer_create(&Display::timerCb, 200, this);   /* 5 Hz screen data refresh */
 
     m_ready = true;
@@ -146,13 +166,20 @@ void Display::setBrightness(uint8_t pct) {
         ledcWrite(PIN_DPL_PWM, (uint32_t)(pct * 255UL / 100UL));
 }
 
-void Display::notify(const char *msg, uint32_t durationMs) {
+static void setTextIfChanged(lv_obj_t *l, const char *txt);
+
+void Display::notify(const char *title, const char *value, uint32_t durationMs,
+                     uint32_t color) {
     /* called from other tasks: only buffer the text; the UI task renders it */
-    if (!msg) msg = "";
+    if (!title) title = "";
+    if (!value) value = "";
     size_t i = 0;
-    for (; i + 1 < sizeof(m_toastMsg) && msg[i]; i++) m_toastMsg[i] = msg[i];
-    m_toastMsg[i] = 0;
+    for (; i + 1 < sizeof(m_toastTitleMsg) && title[i]; i++) m_toastTitleMsg[i] = title[i];
+    m_toastTitleMsg[i] = 0;
+    for (i = 0; i + 1 < sizeof(m_toastValMsg) && value[i]; i++) m_toastValMsg[i] = value[i];
+    m_toastValMsg[i] = 0;
     m_toastDur = durationMs;
+    m_toastColor = color;
     m_toastPending = true;
 }
 
@@ -160,29 +187,63 @@ void Display::update() {
     if (!m_ready) return;
     lv_timer_handler();
 
-    /* transient notification toast on the top layer */
+    /* transient notification banner on the top layer */
     if (m_toastPending) {
         m_toastPending = false;
-        if (!m_toast) {
-            m_toast = lv_label_create(lv_layer_top());
-            lv_obj_set_style_bg_color(m_toast, lv_color_hex(0x0F172A), 0);
-            lv_obj_set_style_bg_opa(m_toast, 235, 0);
-            lv_obj_set_style_border_width(m_toast, 1, 0);
-            lv_obj_set_style_border_color(m_toast, lv_color_hex(0x00E676), 0);
-            lv_obj_set_style_radius(m_toast, 6, 0);
-            lv_obj_set_style_pad_all(m_toast, 6, 0);
-            lv_obj_set_style_text_font(m_toast, &lv_font_montserrat_14, 0);
-            lv_obj_set_style_text_color(m_toast, lv_color_hex(0x00E676), 0);
-            lv_obj_align(m_toast, LV_ALIGN_BOTTOM_MID, 0, -10);
+        if (!m_toastBox) {
+            m_toastBox = lv_obj_create(lv_layer_top());
+            lv_obj_set_size(m_toastBox, 210, 68);
+            lv_obj_set_style_bg_color(m_toastBox, lv_color_hex(0x0B1220), 0);
+            lv_obj_set_style_bg_opa(m_toastBox, 102, 0);
+            lv_obj_set_style_border_width(m_toastBox, 2, 0);
+            lv_obj_set_style_border_color(m_toastBox, lv_color_hex(0x22C55E), 0);
+            lv_obj_set_style_radius(m_toastBox, 12, 0);
+            lv_obj_set_style_pad_all(m_toastBox, 0, 0);
+            lv_obj_remove_flag(m_toastBox, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_remove_flag(m_toastBox, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_align(m_toastBox, LV_ALIGN_BOTTOM_MID, 0, -34);
+
+            m_toastTitle = lv_label_create(m_toastBox);
+            lv_obj_set_width(m_toastTitle, 190);
+            lv_obj_set_pos(m_toastTitle, 8, 8);
+            lv_obj_set_style_text_align(m_toastTitle, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_font(m_toastTitle, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(m_toastTitle, lv_color_hex(0x94A3B8), 0);
+            lv_label_set_long_mode(m_toastTitle, LV_LABEL_LONG_CLIP);
+            lv_label_set_text(m_toastTitle, "");
+
+            m_toastVal = lv_label_create(m_toastBox);
+            lv_obj_set_width(m_toastVal, 190);
+            lv_obj_set_pos(m_toastVal, 8, 26);
+            lv_obj_set_style_text_align(m_toastVal, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_font(m_toastVal, font_val, 0);
+            lv_obj_set_style_text_color(m_toastVal, lv_color_hex(0x22C55E), 0);
+            lv_label_set_long_mode(m_toastVal, LV_LABEL_LONG_CLIP);
+            lv_label_set_text(m_toastVal, "");
         }
-        lv_label_set_text(m_toast, m_toastMsg);
-        lv_obj_remove_flag(m_toast, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(m_toast);
+        lv_label_set_text(m_toastTitle, m_toastTitleMsg);
+        lv_label_set_text(m_toastVal, m_toastValMsg);
+        lv_obj_set_style_border_color(m_toastBox, lv_color_hex(m_toastColor), 0);
+        lv_obj_set_style_text_color(m_toastVal, lv_color_hex(m_toastColor), 0);
+        lv_obj_remove_flag(m_toastBox, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(m_toastBox);
+        /* slide in from below */
+        lv_obj_set_style_translate_y(m_toastBox, 28, 0);
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, m_toastBox);
+        lv_anim_set_values(&a, 28, 0);
+        lv_anim_set_time(&a, 180);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+        lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
+            lv_obj_set_style_translate_y((lv_obj_t *)obj, (lv_coord_t)v, 0);
+        });
+        lv_anim_start(&a);
         m_toastUntil = millis() + m_toastDur;
     }
-    if (m_toast && !lv_obj_has_flag(m_toast, LV_OBJ_FLAG_HIDDEN) &&
+    if (m_toastBox && !lv_obj_has_flag(m_toastBox, LV_OBJ_FLAG_HIDDEN) &&
         (int32_t)(millis() - m_toastUntil) >= 0) {
-        lv_obj_add_flag(m_toast, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(m_toastBox, LV_OBJ_FLAG_HIDDEN);
     }
 
     if (m_switchReq) {
@@ -208,8 +269,21 @@ void Display::update() {
         gFlushUs = 0;
         lastStats = nowMs;
         float avgMs = flushCnt ? (float)flushUs / 1000.0f / flushCnt : 0.0f;
+        m_fps = flushCnt / 2.0f;
+        m_cpu = (avgMs / 5.0f) * 100.0f;      /* UI task busy in its 5 ms loop */
+        if (m_cpu > 100.0f) m_cpu = 100.0f;
+        if (m_statsLbl) {
+            if (m_showStats) {
+                char sb[24];
+                snprintf(sb, sizeof(sb), "%.0ffps %.0f%%", m_fps, m_cpu);
+                setTextIfChanged(m_statsLbl, sb);
+                lv_obj_remove_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
         Serial.printf("[gfx] fl/s=%.0f avgF=%.2fms heap=%u\r\n",
-                      flushCnt / 2.0f, avgMs, (unsigned)ESP.getFreeHeap());
+                      m_fps, avgMs, (unsigned)ESP.getFreeHeap());
     }
 }
 
@@ -317,9 +391,9 @@ void Display::buildScreen2() {
     lv_obj_set_style_text_align(m_s2batWh, LV_TEXT_ALIGN_RIGHT, 0);
     s2label(m_screen2, "Wh", 214, 16, &lv_font_montserrat_14, lv_color_hex(0x00FFFF));
 
-    /* block tags (same font as battery %) */
-    s2label(m_screen2, "A1", 4, 48, font_val, lv_color_hex(0x44AAFF));
-    s2label(m_screen2, "C2", 4, 186, font_val, lv_color_hex(0x44AAFF));
+    /* block tags (same font as battery %), updated from the selected ports */
+    m_s2lblA2 = s2label(m_screen2, kChannelName[m_s2Top], 4, 48, font_val, lv_color_hex(0x44AAFF));
+    m_s2lblC1 = s2label(m_screen2, kChannelName[m_s2Bot], 4, 186, font_val, lv_color_hex(0x44AAFF));
 
     /* 8 stacked value rows (A1 block then C2 block), right-aligned */
     m_s2a2V  = s2val(m_screen2, "--", 8, 42,  &font_osc_data, lv_color_hex(0xFFFF00));
@@ -338,22 +412,65 @@ void Display::updateScreen2() {
     App &a = *m_app;
     char b[24];
 
+    if (m_s2Sel && m_s2SelUntil && (int32_t)(millis() - m_s2SelUntil) >= 0)
+        m_s2Sel = 0;   /* selection timed out */
+
     snprintf(b, sizeof(b), "%.0f%%", a.batSOC());
     setTextIfChanged(m_s2soc, b);
     snprintf(b, sizeof(b), "%.3f", a.energyWh(CH_BAT));
     setTextIfChanged(m_s2batWh, b);
 
-    const PowerMeasurement &a1 = a.monitor.get(CH_A1);
-    const PowerMeasurement &c2 = a.monitor.get(CH_C2);
-    snprintf(b, sizeof(b), "%.3f V",  a1.voltage); setTextIfChanged(m_s2a2V,  b);
-    snprintf(b, sizeof(b), "%.3f A",  a1.current); setTextIfChanged(m_s2a2A,  b);
-    snprintf(b, sizeof(b), "%.3f W",  a1.power);   setTextIfChanged(m_s2a2W,  b);
-    snprintf(b, sizeof(b), "%.3f Wh", a.energyWh(CH_A1)); setTextIfChanged(m_s2a2Wh, b);
-    snprintf(b, sizeof(b), "%.3f V",  c2.voltage); setTextIfChanged(m_s2c1V,  b);
-    snprintf(b, sizeof(b), "%.3f A",  c2.current); setTextIfChanged(m_s2c1A,  b);
-    snprintf(b, sizeof(b), "%.3f W",  c2.power);   setTextIfChanged(m_s2c1W,  b);
-    snprintf(b, sizeof(b), "%.3f Wh", a.energyWh(CH_C2)); setTextIfChanged(m_s2c1Wh, b);
+    setTextIfChanged(m_s2lblA2, kChannelName[m_s2Top]);
+    setTextIfChanged(m_s2lblC1, kChannelName[m_s2Bot]);
+    lv_obj_set_style_text_color(m_s2lblA2,
+        (m_s2Sel == 1) ? lv_color_hex(0xFFA500) : lv_color_hex(0x44AAFF), 0);
+    lv_obj_set_style_text_color(m_s2lblC1,
+        (m_s2Sel == 2) ? lv_color_hex(0xFFA500) : lv_color_hex(0x44AAFF), 0);
+
+    const PowerMeasurement &top = a.monitor.get(m_s2Top);
+    const PowerMeasurement &bot = a.monitor.get(m_s2Bot);
+    snprintf(b, sizeof(b), "%.3f V",  top.voltage); setTextIfChanged(m_s2a2V,  b);
+    snprintf(b, sizeof(b), "%.3f A",  top.current); setTextIfChanged(m_s2a2A,  b);
+    snprintf(b, sizeof(b), "%.3f W",  top.power);   setTextIfChanged(m_s2a2W,  b);
+    snprintf(b, sizeof(b), "%.3f Wh", a.energyWh(m_s2Top)); setTextIfChanged(m_s2a2Wh, b);
+    snprintf(b, sizeof(b), "%.3f V",  bot.voltage); setTextIfChanged(m_s2c1V,  b);
+    snprintf(b, sizeof(b), "%.3f A",  bot.current); setTextIfChanged(m_s2c1A,  b);
+    snprintf(b, sizeof(b), "%.3f W",  bot.power);   setTextIfChanged(m_s2c1W,  b);
+    snprintf(b, sizeof(b), "%.3f Wh", a.energyWh(m_s2Bot)); setTextIfChanged(m_s2c1Wh, b);
 }
+
+void Display::saveUiPrefs() {
+    if (!m_app) return;
+    m_app->fram.uiPrefsSave((uint8_t)m_s2Top, (uint8_t)m_s2Bot, m_showStats ? 1 : 0);
+}
+
+void Display::setShowStats(bool on) {
+    m_showStats = on;
+    saveUiPrefs();
+}
+
+void Display::s2SelectNext() {
+    m_s2Sel = (uint8_t)((m_s2Sel + 1) % 3);   /* none -> top -> bottom -> none */
+    m_s2SelUntil = (m_s2Sel ? millis() + 8000UL : 0);
+}
+
+void Display::s2StepPort(int dir) {
+    static const PowerChannel kPorts[4] = {CH_A1, CH_A2, CH_C1, CH_C2};
+    if (m_s2Sel == 0) return;
+    PowerChannel &cur = (m_s2Sel == 1) ? m_s2Top : m_s2Bot;
+    PowerChannel other = (m_s2Sel == 1) ? m_s2Bot : m_s2Top;
+    int idx = 0;
+    for (int i = 0; i < 4; i++) if (kPorts[i] == cur) { idx = i; break; }
+    for (int n = 0; n < 3; n++) {              /* skip the other half's port */
+        idx = (idx + dir + 4) % 4;
+        if (kPorts[idx] != other) { cur = kPorts[idx]; break; }
+    }
+    m_s2SelUntil = millis() + 8000UL;
+    saveUiPrefs();
+}
+
+void Display::s2PortPrev() { s2StepPort(-1); }
+void Display::s2PortNext() { s2StepPort(+1); }
 
 typedef struct { const char *name; const char *cmd; } CfgItem;
 static const CfgItem kCfg[] = {
@@ -367,6 +484,7 @@ static const CfgItem kCfg[] = {
     {"screen","display screen"},
     {"rtc","rtc"}, {"sensor","sensor list"}, {"status","status"},
     {"rtos","rtos tasks"}, {"wakeup","wakeup"}, {"chargefull","chargefull"},
+    {"stats","stats"},
     {"cable","cable"},
     {"cable test","cable test 1.0"},
     {"rte","rte"},
@@ -387,7 +505,8 @@ static bool isLight(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].nam
 static bool isScreen(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "screen") == 0; }
 static bool isRtc(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "rtc") == 0; }
 static bool isLog(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "log") == 0; }
-static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i)||isPortEnergy(i); }
+static bool isStats(int i) { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "stats") == 0; }
+static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i)||isPortEnergy(i)||isStats(i); }
 
 /* subcommand list for list-type items */
 static const char *const *subList(int i, int *n) {
@@ -401,6 +520,7 @@ static const char *const *subList(int i, int *n) {
     static const char *const subRtc[4]    = {"get","source ext","source soft","raw"};
     static const char *const subTimeout[5] = {"off","30","60","120","180"};
     static const char *const subPortEnergy[3] = {"status","on","off"};
+    static const char *const subStats[3] = {"status","on","off"};
     static const char *const subLog[7] = {"status","enable","disable","level error","level warn","level info","level debug"};
     if (isMcu(i))     { *n = 6; return subMcu; }
     if (isMelody(i))  { *n = 3; return subMelody; }
@@ -412,6 +532,7 @@ static const char *const *subList(int i, int *n) {
     if (isRtc(i))     { *n = 4; return subRtc; }
     if (isTimeout(i)) { *n = 5; return subTimeout; }
     if (isPortEnergy(i)) { *n = 3; return subPortEnergy; }
+    if (isStats(i))    { *n = 3; return subStats; }
     if (isLog(i))     { *n = 7; return subLog; }
     *n = 0; return nullptr;
 }
@@ -533,6 +654,8 @@ void Display::updateScreen3() {
             else if (isLight(i))  snprintf(b, sizeof(b), "%s light %u%%", (i == m_cfgSel ? ">" : " "), (unsigned)(m_app ? m_app->light() : 0));
             else if (isPortEnergy(i)) snprintf(b, sizeof(b), "%s port Wh %s", (i == m_cfgSel ? ">" : " "),
                                               (m_app && m_app->energy.sessionEnabled()) ? "ON" : "off");
+            else if (isStats(i)) snprintf(b, sizeof(b), "%s stats %s", (i == m_cfgSel ? ">" : " "),
+                                          m_showStats ? "ON" : "off");
             else if (isEnergy(i)) snprintf(b, sizeof(b), "%s energy %.1f Wh", (i == m_cfgSel ? ">" : " "), m_cfgNum);
             else if (isOvp(i)) {
                 float v = (m_cfgActive && i == m_cfgSel) ? m_cfgNum
@@ -878,10 +1001,30 @@ void Display::updateLabels() {
     float batP  = a.batPower();
     float ip1P  = a.monitor.get(CH_IP1).power;
     float ip2P  = a.monitor.get(CH_IP2).power;
-    setEff(ui_effC1, a.monitor.get(CH_C1).power, effDen(ip1P, batP));
-    setEff(ui_effC2, a.monitor.get(CH_C2).power, effDen(ip1P, batP));
-    setEff(ui_effA1, a.monitor.get(CH_A1).power, effDen(ip2P, batP));
-    setEff(ui_effA2, a.monitor.get(CH_A2).power, effDen(ip2P, batP));
+    const PowerMeasurement &pc1 = a.monitor.get(CH_C1);
+    const PowerMeasurement &pc2 = a.monitor.get(CH_C2);
+    /* Hardware pairs: IP1 -> C1+A1, IP2 -> C2+A2. When the paired USB-C port
+     * is charging (5V pass-through), the A port is fed from that input, so use
+     * its power as the denominator instead of the (idle) battery rail. */
+    bool c1In = (pc1.voltage > 3.7f) && (pc1.current > 0.05f);
+    bool c2In = (pc2.voltage > 3.7f) && (pc2.current > 0.05f);
+    /* USB-C input ports report total useful output for their PMIC
+     * (battery charge + paired A-port output) over the input power, so a 5V
+     * pass-through shows the real conversion efficiency instead of 0%. */
+    float chgP = -batP; if (chgP < 0.0f) chgP = 0.0f;
+    float a1P = a.monitor.get(CH_A1).power;
+    float a2P = a.monitor.get(CH_A2).power;
+    float c1Den = fabsf(pc1.power);
+    float c2Den = fabsf(pc2.power);
+    float outAll = fabsf(a1P) + fabsf(a2P);   /* all USB outputs (end-to-end) */
+    float c1Num = chgP + outAll;
+    float c2Num = chgP + outAll;
+    if (c1Num > c1Den) c1Num = c1Den;
+    if (c2Num > c2Den) c2Num = c2Den;
+    setEff(ui_effC1, c1In ? c1Num : pc1.power, c1In ? c1Den : effDen(ip1P, batP));
+    setEff(ui_effC2, c2In ? c2Num : pc2.power, c2In ? c2Den : effDen(ip2P, batP));
+    setEff(ui_effA1, a1P, c1In ? c1Den : effDen(ip1P, batP));
+    setEff(ui_effA2, a2P, c2In ? c2Den : effDen(ip2P, batP));
     float rteRemaining = a.battery.energyRemainingWh();
     float rteFull = a.batCapacityMah() / 1000.0f * BATTERY_NOMINAL_VOLTAGE;
     float rteW  = a.batPower();   /* negative = charging */

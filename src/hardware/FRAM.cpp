@@ -230,6 +230,47 @@ bool FRAM::sessionSave(bool on) {
     return ok;
 }
 
+/* Screen2 port layout + stats overlay at 0x0220 (separate record). */
+#define FRAM_UIPREFS_OFFSET 0x0220u
+#define FRAM_UIPREFS_MAGIC  0x55495031u   /* "UIP1" */
+#define FRAM_UIPREFS_LEN    12u
+
+bool FRAM::uiPrefsLoad(uint8_t &topPort, uint8_t &bottomPort, uint8_t &statsOn) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_UIPREFS_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_UIPREFS_OFFSET, (byte)FRAM_UIPREFS_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&crc, b + 8, 4);
+    if (magic != FRAM_UIPREFS_MAGIC) return false;
+    if (crc != persist_crc32(b, 8)) return false;
+    topPort = b[4];
+    bottomPort = b[5];
+    statsOn = b[6];
+    return true;
+}
+
+bool FRAM::uiPrefsSave(uint8_t topPort, uint8_t bottomPort, uint8_t statsOn) {
+    if (!m_present) return false;
+    uint8_t b[FRAM_UIPREFS_LEN];
+    uint32_t magic = FRAM_UIPREFS_MAGIC;
+    uint32_t crc;
+    memset(b, 0, sizeof(b));
+    memcpy(b, &magic, 4);
+    b[4] = topPort;
+    b[5] = bottomPort;
+    b[6] = statsOn;
+    crc = persist_crc32(b, 8);
+    memcpy(b + 8, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_UIPREFS_OFFSET, (byte)FRAM_UIPREFS_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
 void FRAM::save() {
     if (!m_present) return;
     bool saved = false;

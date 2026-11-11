@@ -469,7 +469,14 @@ static void cmdIP(Output &out, const std::vector<String> &a) {
     }
     else if (sub == "charge") {
         if (a.size() < 4) { out.println("ERROR charge on|off"); done = false; }
-        else { bool on = onOff(a[3]); s.enableCharger(on); out.printf("OK charger %s\r\n", on ? "enabled" : "disabled"); }
+        else {
+            bool on = onOff(a[3]);
+            bool outOn = s.isOutputEnabled(IP5356::Port::VOUT1) ||
+                         s.isOutputEnabled(IP5356::Port::VOUT2);
+            s.enableCharger(on);
+            if (!on && outOn) s.setOutputsMos(true);   /* keep USB-A outputs alive */
+            out.printf("OK charger %s\r\n", on ? "enabled" : "disabled");
+        }
     }
     else if (sub == "boost") {
         if (a.size() < 4) { out.println("ERROR boost on|off"); done = false; }

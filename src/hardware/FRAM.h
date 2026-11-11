@@ -45,6 +45,10 @@ public:
     bool sessionLoad(bool &on);
     bool sessionSave(bool on);
 
+    /* Screen2 port layout + FPS/CPU overlay preference (separate record). */
+    bool uiPrefsLoad(uint8_t &topPort, uint8_t &bottomPort, uint8_t &statsOn);
+    bool uiPrefsSave(uint8_t topPort, uint8_t bottomPort, uint8_t statsOn);
+
     void erase();   /* writes 0xFF to whole device (config reinitialized) */
 
     uint16_t capacity() const { return m_cap; }

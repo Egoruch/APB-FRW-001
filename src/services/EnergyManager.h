@@ -24,9 +24,9 @@ public:
     bool sessionEnabled() const { return m_sessionEnabled; }
     void setSessionEnabled(bool on);
 
-    /* Consume a pending "session reset" notice (previous Wh + port name) so
-     * the caller can show it on the display. */
-    bool takeResetNotice(char *port, size_t n, float &oldWh);
+    /* Consume a pending port notice (Wh + port name); disconnected=true when
+     * the notice is for a removed device (session delivered energy). */
+    bool takePortNotice(char *port, size_t n, float &wh, bool &disconnected);
 
 private:
     PowerMonitor &m_mon;
@@ -34,9 +34,11 @@ private:
     uint32_t m_lastMs = 0;
     bool m_sessionEnabled = true;
     bool m_portPresent[CH_COUNT] = {};
+    bool m_portWasSource[CH_COUNT] = {};   /* session supplied a device */
     uint32_t m_portLoadSince[CH_COUNT] = {};
     uint32_t m_portAbsentSince[CH_COUNT] = {};
     volatile bool m_noticePending = false;
+    volatile bool m_noticeDisconnect = false;
     char m_noticePort[4] = "";
     volatile float m_noticeWh = 0;
     void updatePortSessions(uint32_t now);
