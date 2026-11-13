@@ -120,6 +120,7 @@ void App::begin() {
 bool App::enterDeepSleep() {    /* Refuse if MCU_WAKE is already active - several beeps as feedback */
     if (digitalRead(PIN_MCU_WAKE) == HIGH) {
         LOG_WARN("MCU_WAKE active - deep sleep refused");
+        display.notify("SLEEP BLOCKED", "USB ON", 4500, 0xF59E0B);
         for (int i = 0; i < 3; i++) {
             buzzer.on();
             vTaskDelay(pdMS_TO_TICKS(80));
@@ -471,6 +472,7 @@ void App::onButtonEvent(const char *event, uint8_t idx) {
             if (digitalRead(PIN_MCU_WAKE) == HIGH) {
                 /* wake line active - refuse with 3 separate beeps */
                 LOG_WARN("MCU_WAKE active - not sleeping");
+                display.notify("SLEEP BLOCKED", "USB ON", 4500, 0xF59E0B);
                 for (int i = 0; i < 3; i++) { buzzer.on(); vTaskDelay(pdMS_TO_TICKS(80)); buzzer.off(); vTaskDelay(pdMS_TO_TICKS(80)); }
             } else {
                 buzzer.on();
@@ -490,8 +492,14 @@ void App::eloadSetPercent(float p) {
 
 bool App::startEloadSweep() {
     if (m_eloadRunning) return false;
-    if (batVoltage() < RESISTANCE_MIN_CELL_VOLTAGE) return false;
-    if (m_eloadTemp >= ELOAD_TEST_MAX_TEMP_C) return false;
+    if (batVoltage() < RESISTANCE_MIN_CELL_VOLTAGE) {
+        display.notify("ELOAD BLOCKED", "LOW BAT", 4500, 0xEF4444);
+        return false;
+    }
+    if (m_eloadTemp >= ELOAD_TEST_MAX_TEMP_C) {
+        display.notify("ELOAD BLOCKED", "OVERTEMP", 4500, 0xEF4444);
+        return false;
+    }
 
     m_eloadAbort = false;
     m_eloadRunning = true;
@@ -500,6 +508,7 @@ bool App::startEloadSweep() {
         m_eloadRunning = false;
         return false;
     }
+    display.notify("ELOAD", "START", 4500, 0xF59E0B);
     return true;
 }
 
@@ -583,6 +592,16 @@ void App::eloadSweepTask(void *p) {
     if (abortReason) {
         out.printf("ELOAD test aborted: %s\r\n", abortReason);
         a->buzzer.beep(300);
+        const char *ttl = "ELOAD ABORT";
+        if      (strcmp(abortReason, "cancelled") == 0)    ttl = "ELOAD CANCELLED";
+        else if (strcmp(abortReason, "overtemp") == 0)     ttl = "ELOAD OVERTEMP";
+        else if (strcmp(abortReason, "undervoltage") == 0) ttl = "ELOAD LOW BAT";
+        else if (strcmp(abortReason, "overcurrent") == 0)  ttl = "ELOAD OVERCURR";
+        a->display.notify(ttl, "ABORTED", 4500, 0xEF4444);
+    } else {
+        char v[16];
+        snprintf(v, sizeof(v), "%.0f mOhm", a->m_eloadR);
+        a->display.notify("ELOAD DONE", v, 4500, 0x22C55E);
     }
     out.printf("ELOAD result: R %.1f mOhm | V %.2f V | I %.2f A | P %.2f W | T %.1f C\r\n",
                a->m_eloadR, pm.voltage, pm.current, pm.power, a->eloadTemp());
@@ -865,6 +884,7 @@ void App::monitorLoop() {
                     m_ovpSince = 0;
                     m_ovpLastAttempt = 0;
                     out.println("[batt] OVP latch cleared (charger disconnected)");
+                    display.notify("OVP", "CLEARED", 4500, 0x22C55E);
                 }
             } else {
                 m_chargerAbsentSince = 0;
@@ -879,6 +899,7 @@ void App::monitorLoop() {
                             m_ovpTripMs = now;
                             m_ovpLastAttempt = now;
                             out.printf("[batt] OVERVOLTAGE %.2f V >= %.2f V cutoff -> chargers OFF (latched)\r\n", vbat, m_ovpCutoffV);
+                            display.notify("OVERVOLTAGE", "CHG OFF", 4500, 0xEF4444);
                             if (!disableChargingIPs())
                                 out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
                         }
@@ -980,14 +1001,22 @@ void App::monitorLoop() {
                 bool clearCandidate = (soc >= BATTERY_LOW_CLEAR_PCT) && !charging;
                 if (clearCandidate) {
                     if (!clearSince) clearSince = millis();
-                    if ((uint32_t)(millis() - clearSince) >= 5000UL)
+                    if ((uint32_t)(millis() - clearSince) >= 5000UL &&
+                        m_lowBatteryLatched) {
                         m_lowBatteryLatched = false;
+                        char v[8];
+                        snprintf(v, sizeof(v), "%.0f%%", soc);
+                        display.notify("BATTERY OK", v, 4500, 0x22C55E);
+                    }
                 } else {
                     clearSince = 0;
                 }
                 if (!charging && soc <= BATTERY_LOW_PCT && !m_lowBatteryLatched) {
                     m_lowBatteryLatched = true;
                     Serial.println("[batt] LOW BATTERY -> beep + red flash every 5 min");
+                    char v[8];
+                    snprintf(v, sizeof(v), "%.0f%%", soc);
+                    display.notify("LOW BATTERY", v, 4500, 0xEF4444);
                     startLowBatteryAlarm();
                 }
             }
@@ -1006,6 +1035,7 @@ void App::chargeDoneAlarmTask(void *p) {
 }
 
 void App::startChargeDoneAlarm() {
+    display.notify("CHARGE DONE", "100%", 4500, 0x22C55E);
     xTaskCreate(chargeDoneAlarmTask, "chardone", 4096, this, 2, NULL);
 }
 

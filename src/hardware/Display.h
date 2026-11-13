@@ -99,9 +99,7 @@ private:
     uint8_t m_s2Sel = 0;              /* 0 none, 1 top, 2 bottom */
     uint32_t m_s2SelUntil = 0;        /* auto-clear selection */
     bool m_showStats = false;
-    lv_obj_t *m_statsLbl = nullptr;   /* screen1 FPS/CPU overlay */
-    float m_fps = 0;
-    float m_cpu = 0;
+    bool m_statsApplied = false;      /* LVGL perf monitor currently shown */
     void s2StepPort(int dir);
     void saveUiPrefs();
 

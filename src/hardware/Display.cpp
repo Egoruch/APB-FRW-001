@@ -145,13 +145,9 @@ void Display::begin(App &app) {
     buildScreen3();
     buildScreen4();
 
-    /* screen1 bottom-right FPS/CPU overlay (hidden unless enabled) */
-    m_statsLbl = lv_label_create(m_screen1);
-    lv_label_set_text(m_statsLbl, "");
-    lv_obj_align(m_statsLbl, LV_ALIGN_BOTTOM_RIGHT, -4, -2);
-    lv_obj_set_style_text_font(m_statsLbl, &font_tiny_data, 0);
-    lv_obj_set_style_text_color(m_statsLbl, lv_color_hex(0x64748B), 0);
-    if (!m_showStats) lv_obj_add_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
+    /* LVGL built-in FPS/CPU monitor: optional, off by default */
+    lv_sysmon_hide_performance(g_disp);
+    m_statsApplied = false;
 
     lv_timer_create(&Display::timerCb, 200, this);   /* 5 Hz screen data refresh */
 
@@ -194,7 +190,7 @@ void Display::update() {
             m_toastBox = lv_obj_create(lv_layer_top());
             lv_obj_set_size(m_toastBox, 210, 68);
             lv_obj_set_style_bg_color(m_toastBox, lv_color_hex(0x0B1220), 0);
-            lv_obj_set_style_bg_opa(m_toastBox, 102, 0);
+            lv_obj_set_style_bg_opa(m_toastBox, 204, 0);
             lv_obj_set_style_border_width(m_toastBox, 2, 0);
             lv_obj_set_style_border_color(m_toastBox, lv_color_hex(0x22C55E), 0);
             lv_obj_set_style_radius(m_toastBox, 12, 0);
@@ -262,6 +258,14 @@ void Display::update() {
     }
     static uint32_t lastStats = 0;
     uint32_t nowMs = millis();
+
+    /* apply the FPS/CPU overlay preference (LVGL sysmon, UI task only) */
+    if (m_statsApplied != m_showStats) {
+        m_statsApplied = m_showStats;
+        if (m_showStats) lv_sysmon_show_performance(g_disp);
+        else             lv_sysmon_hide_performance(g_disp);
+    }
+
     if (nowMs - lastStats >= 2000) {
         uint32_t flushCnt = gFlushCnt;
         uint64_t flushUs = gFlushUs;
@@ -269,21 +273,8 @@ void Display::update() {
         gFlushUs = 0;
         lastStats = nowMs;
         float avgMs = flushCnt ? (float)flushUs / 1000.0f / flushCnt : 0.0f;
-        m_fps = flushCnt / 2.0f;
-        m_cpu = (avgMs / 5.0f) * 100.0f;      /* UI task busy in its 5 ms loop */
-        if (m_cpu > 100.0f) m_cpu = 100.0f;
-        if (m_statsLbl) {
-            if (m_showStats) {
-                char sb[24];
-                snprintf(sb, sizeof(sb), "%.0ffps %.0f%%", m_fps, m_cpu);
-                setTextIfChanged(m_statsLbl, sb);
-                lv_obj_remove_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(m_statsLbl, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
         Serial.printf("[gfx] fl/s=%.0f avgF=%.2fms heap=%u\r\n",
-                      m_fps, avgMs, (unsigned)ESP.getFreeHeap());
+                      flushCnt / 2.0f, avgMs, (unsigned)ESP.getFreeHeap());
     }
 }
 
@@ -484,7 +475,7 @@ static const CfgItem kCfg[] = {
     {"screen","display screen"},
     {"rtc","rtc"}, {"sensor","sensor list"}, {"status","status"},
     {"rtos","rtos tasks"}, {"wakeup","wakeup"}, {"chargefull","chargefull"},
-    {"stats","stats"},
+    {"stats","display stats"},
     {"cable","cable"},
     {"cable test","cable test 1.0"},
     {"rte","rte"},

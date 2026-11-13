@@ -45,6 +45,11 @@ static void cmdDisplay(Output &out, const std::vector<String> &a) {
         if (a.size() >= 3) {
             String op = a[2];
             op.toLowerCase();
+            if (op == "status") {
+                out.printf("FPS/CPU overlay: %s\r\n", app.display.showStats() ? "ON" : "off");
+                out.println("OK");
+                return;
+            }
             if (op == "on" || op == "off" || op == "1" || op == "0") {
                 bool on = (op == "on" || op == "1");
                 app.display.setShowStats(on);
