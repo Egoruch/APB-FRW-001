@@ -176,6 +176,12 @@ private:
     uint32_t m_chargeEdgeMs = 0;                  /* start/stop debounce */
     uint32_t m_chargeLastMs = 0;
     float m_chargeWh = 0;                         /* energy into pack this session */
+    uint8_t m_fullSeq = 0;                        /* charge-full sleep sequence */
+    uint32_t m_fullSeqMs = 0;
+    bool m_fullScreenOff = false;
+    float m_ipVbat = 0;                           /* PMIC battery voltage (OVP source) */
+    uint32_t m_ipVbatMs = 0;
+    bool m_ipVbatValid = false;
 };
 
 

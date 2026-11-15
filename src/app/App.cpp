@@ -300,6 +300,8 @@ bool App::markActivityWoke() {
         m_chargeRgbBlanked = false;
         m_chargeRgbSince = millis();
     }
+    m_fullSeq = 0;                          /* user activity cancels the full-charge sleep sequence */
+    m_fullScreenOff = false;
     Serial.println("[ui] activity -> wake");
     return true;
 }
@@ -873,10 +875,32 @@ void App::monitorLoop() {
             float vbat = batVoltage();
             bool chargerPresent = (monitor.get(CH_C1).voltage > 3.7f) ||
                                   (monitor.get(CH_C2).voltage > 3.7f);
+
+            /* The SYS INA carries a ~90 mV offset at rest; the PMIC's own Vbat
+             * ADC tracks the cell. Use it for the cutoff decision (refreshed
+             * every 2 s while a charger is present). */
+            if (chargerPresent &&
+                (!m_ipVbatValid || (uint32_t)(millis() - m_ipVbatMs) >= 2000UL)) {
+                m_ipVbatMs = millis();
+                uint8_t ch = (monitor.get(CH_C2).voltage > monitor.get(CH_C1).voltage) ? 1 : 0;
+                if (ipman.begin(ch)) {
+                    m_ipVbat = ipman.current().getBatteryVoltageV();
+                    m_ipVbatValid = (m_ipVbat > 2.0f && m_ipVbat < 5.0f);
+                    ipman.end();
+                }
+            }
+            if (chargerPresent && m_ipVbatValid) vbat = m_ipVbat;
+            /* Enforce only with a trusted source; fall back to the INA if the
+             * PMIC cannot be read for >5 s. This avoids a boot-time false trip
+             * from the INA offset before the first PMIC reading. */
+            bool vbatTrusted = m_ipVbatValid ||
+                               (m_ipVbatMs && (uint32_t)(millis() - m_ipVbatMs) > 5000UL);
+
             uint32_t now = millis();
             SerialOutput out;
 
             if (!chargerPresent) {
+                m_ipVbatValid = false;
                 if (!m_chargerAbsentSince) m_chargerAbsentSince = now;
                 if (m_chargeOvpLatched &&
                     (uint32_t)(now - m_chargerAbsentSince) >= BATTERY_OVP_CLEAR_MS) {
@@ -890,7 +914,7 @@ void App::monitorLoop() {
                 m_chargerAbsentSince = 0;
 
                 if (!m_chargeOvpLatched) {
-                    if (vbat >= m_ovpCutoffV) {
+                    if (vbatTrusted && vbat >= m_ovpCutoffV) {
                         if (!m_ovpSince) m_ovpSince = now;
                         if ((uint32_t)(now - m_ovpSince) >= BATTERY_OVP_DEBOUNCE_MS) {
                             m_chargeOvpLatched = true;
@@ -899,24 +923,51 @@ void App::monitorLoop() {
                             m_ovpTripMs = now;
                             m_ovpLastAttempt = now;
                             out.printf("[batt] OVERVOLTAGE %.2f V >= %.2f V cutoff -> chargers OFF (latched)\r\n", vbat, m_ovpCutoffV);
-                            display.notify("OVERVOLTAGE", "CHG OFF", 4500, 0xEF4444);
+                            if (m_ovpCutoffV >= 4.15f) {
+                                /* full-charge cutoff: treat as charge complete */
+                                startChargeDoneAlarm();
+                                m_fullSeq = 1;
+                                m_fullSeqMs = millis();
+                                m_fullScreenOff = false;
+                            } else {
+                                display.notify("OVERVOLTAGE", "CHG OFF", 4500, 0xEF4444);
+                            }
                             if (!disableChargingIPs())
                                 out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
                         }
                     } else {
                         m_ovpSince = 0;
                     }
-                } else if ((monitor.get(CH_C1).current > 0.05f ||
-                            monitor.get(CH_C2).current > 0.05f) &&
-                           (uint32_t)(now - m_ovpLastAttempt) >= 2000UL) {
-                    /* The PMIC may re-enable charging after a reset/insertion.
-                     * Only USB-C input current may trigger this: a USB-A load
-                     * also discharges the pack (negative batCurrent) but must
-                     * not be disturbed by OVP. */
-                    m_ovpLastAttempt = now;
-                    out.println("[batt] OVP: charger re-enabled -> forcing OFF again");
-                    if (!disableChargingIPs())
-                        out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
+                } else {
+                    /* latched: auto-recover once the pack relaxes well below
+                     * the cutoff, so charging resumes without a replug */
+                    static uint32_t relaxSince = 0;
+                    if (vbat <= m_ovpCutoffV - 0.10f) {
+                        if (!relaxSince) relaxSince = now;
+                        if ((uint32_t)(now - relaxSince) >= 10000UL) {
+                            m_chargeOvpLatched = false;
+                            m_ovpSince = 0;
+                            m_ovpLastAttempt = 0;
+                            relaxSince = 0;
+                            out.println("[batt] OVP latch cleared (voltage relaxed)");
+                            display.notify("OVP", "CLEARED", 4500, 0x22C55E);
+                            enableChargingIPs();
+                        }
+                    } else {
+                        relaxSince = 0;
+                        if ((monitor.get(CH_C1).current > 0.05f ||
+                             monitor.get(CH_C2).current > 0.05f) &&
+                            (uint32_t)(now - m_ovpLastAttempt) >= 2000UL) {
+                            /* The PMIC may re-enable charging after a reset/insertion.
+                             * Only USB-C input current may trigger this: a USB-A load
+                             * also discharges the pack (negative batCurrent) but must
+                             * not be disturbed by OVP. */
+                            m_ovpLastAttempt = now;
+                            out.println("[batt] OVP: charger re-enabled -> forcing OFF again");
+                            if (!disableChargingIPs())
+                                out.println("[batt] OVP: no IP5356 charger acknowledged the cutoff");
+                        }
+                    }
                 }
             }
         }
@@ -988,6 +1039,9 @@ void App::monitorLoop() {
                 m_chargeDoneNotified = true;
                 Serial.println("[charge] battery full -> charge-done alarm");
                 startChargeDoneAlarm();
+                m_fullSeq = 1;
+                m_fullSeqMs = millis();
+                m_fullScreenOff = false;
             } else if (!full) {
                 m_chargeDoneNotified = false;
             }
@@ -1022,15 +1076,53 @@ void App::monitorLoop() {
             }
             rgb.setLowBattery(m_lowBatteryLatched && !charging);
         }
+        /* charge-full sequence: green+beep -> screen off -> green -> sleep */
+        if (m_fullSeq) {
+            bool load = fabsf(monitor.get(CH_A1).current) > 0.05f ||
+                        fabsf(monitor.get(CH_A2).current) > 0.05f || m_eloadRunning;
+            bool charger = (monitor.get(CH_C1).voltage > 3.7f) ||
+                           (monitor.get(CH_C2).voltage > 3.7f);
+            if (load || !charger) {              /* abort: something else is active */
+                m_fullSeq = 0;
+                m_fullScreenOff = false;
+                if (m_activityIdle) markActivity();
+            } else if (m_fullSeq == 1) {
+                uint32_t el = millis() - m_fullSeqMs;
+                if (!m_fullScreenOff) {
+                    if (el >= 2500UL) {           /* let the green indication show */
+                        m_prevBrightness = display.brightness() ? display.brightness() : DISP_BL_DEFAULT;
+                        display.setBrightness(0);  /* screen black */
+                        m_activityIdle = true;
+                        m_fullScreenOff = true;
+                        m_fullSeqMs = millis();
+                        Serial.println("[chg] full: screen off, sleep in 60 s");
+                    }
+                } else if (el >= 60000UL) {
+                    rgb.setChargeDone(3000);       /* green lights again */
+                    m_fullSeq = 2;
+                    m_fullSeqMs = millis();
+                    Serial.println("[chg] full: green again, sleep in 30 s");
+                }
+            } else if (m_fullSeq == 2 &&
+                       (uint32_t)(millis() - m_fullSeqMs) >= 30000UL) {
+                m_fullSeq = 0;
+                m_fullScreenOff = false;
+                if (wakeActive()) {               /* charger keeps MCU_WAKE high */
+                    display.notify("SLEEP BLOCKED", "CHARGER ON", 4500, 0xF59E0B);
+                    if (m_activityIdle) markActivity();
+                } else {
+                    enterDeepSleep();
+                }
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(BATTERY_SAMPLE_MS));   /* 100 ms: finer mAh/Wh integration */
     }
 }
 
 void App::chargeDoneAlarmTask(void *p) {
     App *a = (App *)p;
-    a->rgb.setChargeDone(CHARGE_DONE_RGB_MS);
-    static const BuzzerNote chime[] = { {880, 140}, {659, 250}, {523, 420} };
-    a->playMelody(chime, (int)(sizeof(chime) / sizeof(chime[0])));
+    a->rgb.setChargeDone(2500);               /* green light, once */
+    a->buzzer.beep(120);                      /* small sound, once */
     vTaskDelete(NULL);
 }
 
@@ -1134,8 +1226,9 @@ void App::systemLoop() {
             }
         }
 
-        if (m_externalActive) {
-            /* Charging or powering a USB load counts as active use. */
+        if (m_externalActive && m_fullSeq == 0) {
+            /* Charging or powering a USB load counts as active use.
+             * During the full-charge sleep sequence, stay idle. */
             if (m_activityIdle) markActivity();
             else m_lastActivityMs = millis();
         } else if (!m_activityIdle && m_activityTimeoutMs > 0 &&
