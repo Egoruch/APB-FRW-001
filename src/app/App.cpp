@@ -740,6 +740,14 @@ void App::monitorLoop() {
     for (;;) {
         monitor.sampleAll();
         energy.update();
+        {
+            float bv = batVoltage();
+            if (!m_batVInit) { m_batVMin = m_batVMax = bv; m_batVInit = true; }
+            else {
+                if (bv < m_batVMin) m_batVMin = bv;
+                if (bv > m_batVMax) m_batVMax = bv;
+            }
+        }
         refreshTimeCache();
         time.poll();   /* software clock: persist every 60 s */
         /* ELOAD overtemperature protection: TMP102 0x4A >= 100C -> ELOAD off */
@@ -788,8 +796,19 @@ void App::monitorLoop() {
             /* Charger presence is voltage-based: with En_Charger=0 the port
              * draws no current, so a current edge would never re-enable it. */
             static bool prevSrcPresent = false;
-            bool srcPresent = (monitor.get(CH_C1).voltage >= 3.7f) ||
-                              (monitor.get(CH_C2).voltage >= 3.7f);
+            static uint32_t srcSince = 0;
+            /* A real charger raises the C rail without sourcing current; a
+             * starting boost also raises it but with negative (output)
+             * current. Distinguish them, else setOutputsMos() in the enable
+             * path keeps resetting the output port in a loop. */
+            const PowerMeasurement &pc1 = monitor.get(CH_C1);
+            const PowerMeasurement &pc2 = monitor.get(CH_C2);
+            bool srcBurst = (pc1.voltage >= 3.7f && pc1.current > -0.02f) ||
+                            (pc2.voltage >= 3.7f && pc2.current > -0.02f);
+            if (srcBurst) { if (!srcSince) srcSince = detNow; }
+            else srcSince = 0;
+            bool srcPresent = srcBurst && srcSince &&
+                              (uint32_t)(detNow - srcSince) >= 1000UL;
             if (srcPresent && !prevSrcPresent && !m_chargeOvpLatched) {
                 if (enableChargingIPs())
                     Serial.println("[batt] charger present -> charging enabled");

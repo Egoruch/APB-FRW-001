@@ -15,6 +15,7 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         out.println("SOC     : " + f2str(app.batSOC(), 0) + " %");
         out.println("Energy  : " + f2str(app.energyWh(CH_BAT)) + " Wh");
         out.println("Capacity: " + f2str(app.batCapacityMah(), 0) + " mAh");
+        out.println("Vbat min/max: " + f2str(app.batVMin()) + " / " + f2str(app.batVMax()) + " V");
         if (app.chargeOvpLatched())
             out.printf("OVP latch: ACTIVE (trip %.2f V at %lu s)\r\n",
                        app.ovpTripVoltage(), (unsigned long)(app.ovpTripMs() / 1000UL));
@@ -30,6 +31,25 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
     if (sub == "voltage")   { app.monitor.sampleAll(); out.println("Battery voltage: " + f2str(app.batVoltage()) + " V\r\nOK"); return; }
     if (sub == "current")   { app.monitor.sampleAll(); out.println("Battery current: " + f2str(app.batCurrent()) + " A\r\nOK"); return; }
     if (sub == "power")     { app.monitor.sampleAll(); out.println("Battery power  : " + f2str(app.batPower()) + " W\r\nOK"); return; }
+    if (sub == "monitor") {
+        int sec = (a.size() >= 3) ? atoi(a[2].c_str()) : 10;
+        if (sec < 1) sec = 1;
+        if (sec > 60) sec = 60;
+        out.println("Battery monitor (1 Hz):");
+        float mn = 1e9f, mx = -1e9f;
+        for (int i = 0; i < sec; i++) {
+            app.monitor.sampleAll();
+            float v = app.batVoltage();
+            float c = app.batCurrent();
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+            out.printf("  %2ds  %.3f V  %+6.2f A\r\n", i + 1, v, c);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        out.printf("min %.3f V  max %.3f V  delta %.3f V\r\n", mn, mx, mx - mn);
+        out.println("OK");
+        return;
+    }
     if (sub == "soc")       { out.println("Battery SOC    : " + f2str(app.batSOC(), 0) + " %\r\nOK"); return; }
     if (sub == "capacity" && a.size() >= 3) {
         float mah = atof(a[2].c_str());
@@ -76,10 +96,10 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         out.printf("OK OVP cutoff %.2f V\r\n", app.ovpCutoffVoltage());
         return;
     }
-    out.println("usage: battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp>");
+    out.println("usage: battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp|monitor [sec]>");
 }
 
 void cmdRegisterBattery(CliEngine &cli, App &app) {
     (void)app;
-    cli.registerCommand("battery", "Battery information", "battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp>", cmdBattery);
+    cli.registerCommand("battery", "Battery information", "battery <status|voltage|current|power|soc|capacity|energy|rte|reset|recalibrate|ovp|monitor [sec]>", cmdBattery);
 }

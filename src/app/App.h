@@ -87,6 +87,8 @@ public:
     float batPower();
     float batSOC();
     float batCapacityMah();
+    float batVMin() const { return m_batVMin; }
+    float batVMax() const { return m_batVMax; }
     float energyWh(PowerChannel ch);
     bool chargeOvpLatched() const { return m_chargeOvpLatched; }
     float ovpTripVoltage() const { return m_ovpTripVoltage; }
@@ -182,6 +184,8 @@ private:
     float m_ipVbat = 0;                           /* PMIC battery voltage (OVP source) */
     uint32_t m_ipVbatMs = 0;
     bool m_ipVbatValid = false;
+    float m_batVMin = 0, m_batVMax = 0;           /* battery voltage extremes since boot */
+    bool m_batVInit = false;
 };
 
 
