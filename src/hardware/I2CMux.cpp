@@ -10,8 +10,10 @@ bool I2CMux::begin() {
     Wire.beginTransmission(m_addr);
     m_present = (Wire.endTransmission() == 0);
     if (m_present) {
-        /* select channel 0 while the bus lock is already held (no nested lock) */
-        setMaskLocked((uint8_t)(1 << 0));
+        /* Keep every branch disconnected: selecting a channel whose IP5356 is
+         * asleep loads the bus and can wedge the ESP32-C6 i2c-ng driver
+         * permanently (ESP_ERR_INVALID_STATE) at startup. */
+        setMaskLocked(0);
     }
     i2cBusUnlock();
     return m_present;

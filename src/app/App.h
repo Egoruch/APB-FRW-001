@@ -181,9 +181,6 @@ private:
     uint8_t m_fullSeq = 0;                        /* charge-full sleep sequence */
     uint32_t m_fullSeqMs = 0;
     bool m_fullScreenOff = false;
-    float m_ipVbat = 0;                           /* PMIC battery voltage (OVP source) */
-    uint32_t m_ipVbatMs = 0;
-    bool m_ipVbatValid = false;
     float m_batVMin = 0, m_batVMax = 0;           /* battery voltage extremes since boot */
     bool m_batVInit = false;
 };

@@ -24,7 +24,8 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
                        app.ovpTripVoltage(), (unsigned long)(app.ovpTripMs() / 1000UL));
         else
             out.println("OVP latch: off");
-        out.printf("OVP cutoff: %.2f V\r\n", app.ovpCutoffVoltage());
+        out.printf("OVP cutoff: %.2f V%s\r\n", app.ovpCutoffVoltage(),
+                   app.ovpCutoffVoltage() >= 4.15f ? " (off, PMIC CV)" : "");
         out.println("OK");
         return;
     }

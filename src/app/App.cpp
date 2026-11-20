@@ -148,7 +148,9 @@ void App::bootSequence() {
      * lit strip (SK6812 pixels hold the last colour across the reset). */
     monitor.sampleChannel(CH_C1);
     monitor.sampleChannel(CH_C2);   /* fresh read: monitor task may not have run yet */
-    if (monitor.get(CH_C1).voltage > 3.7f || monitor.get(CH_C2).voltage > 3.7f) {
+    if (wakeActive() ||
+        monitor.get(CH_C1).voltage > 3.7f || monitor.get(CH_C2).voltage > 3.7f) {
+        Serial.println("[boot] show skipped (charger / MCU_WAKE active)");
         rgb.off();
         return;
     }
@@ -809,7 +811,8 @@ void App::monitorLoop() {
             else srcSince = 0;
             bool srcPresent = srcBurst && srcSince &&
                               (uint32_t)(detNow - srcSince) >= 1000UL;
-            if (srcPresent && !prevSrcPresent && !m_chargeOvpLatched) {
+            if (srcPresent && !prevSrcPresent && !m_chargeOvpLatched &&
+                millis() > 3000UL) {
                 if (enableChargingIPs())
                     Serial.println("[batt] charger present -> charging enabled");
             }
@@ -894,32 +897,20 @@ void App::monitorLoop() {
             float vbat = batVoltage();
             bool chargerPresent = (monitor.get(CH_C1).voltage > 3.7f) ||
                                   (monitor.get(CH_C2).voltage > 3.7f);
-
-            /* The SYS INA carries a ~90 mV offset at rest; the PMIC's own Vbat
-             * ADC tracks the cell. Use it for the cutoff decision (refreshed
-             * every 2 s while a charger is present). */
-            if (chargerPresent &&
-                (!m_ipVbatValid || (uint32_t)(millis() - m_ipVbatMs) >= 2000UL)) {
-                m_ipVbatMs = millis();
-                uint8_t ch = (monitor.get(CH_C2).voltage > monitor.get(CH_C1).voltage) ? 1 : 0;
-                if (ipman.begin(ch)) {
-                    m_ipVbat = ipman.current().getBatteryVoltageV();
-                    m_ipVbatValid = (m_ipVbat > 2.0f && m_ipVbat < 5.0f);
-                    ipman.end();
-                }
-            }
-            if (chargerPresent && m_ipVbatValid) vbat = m_ipVbat;
-            /* Enforce only with a trusted source; fall back to the INA if the
-             * PMIC cannot be read for >5 s. This avoids a boot-time false trip
-             * from the INA offset before the first PMIC reading. */
-            bool vbatTrusted = m_ipVbatValid ||
-                               (m_ipVbatMs && (uint32_t)(millis() - m_ipVbatMs) > 5000UL);
+            bool chargingNow = (monitor.get(CH_C1).current > 0.05f) ||
+                               (monitor.get(CH_C2).current > 0.05f);
+            /* No background PMIC sessions here: probing the mux while an
+             * IP5356 branch is asleep wedges the ESP32-C6 i2c-ng driver
+             * (permanent ESP_ERR_INVALID_STATE). Use the SYS INA and a
+             * safety margin instead. At >= 4.15 V the PMIC's own 4.20 V CV
+             * is the correct limit, so firmware OVP is disabled there. */
+            const bool ovpActive = (m_ovpCutoffV < 4.15f);
+            const float ovpTripV = m_ovpCutoffV + 0.06f;   /* INA reads ~90 mV high */
 
             uint32_t now = millis();
             SerialOutput out;
 
             if (!chargerPresent) {
-                m_ipVbatValid = false;
                 if (!m_chargerAbsentSince) m_chargerAbsentSince = now;
                 if (m_chargeOvpLatched &&
                     (uint32_t)(now - m_chargerAbsentSince) >= BATTERY_OVP_CLEAR_MS) {
@@ -933,7 +924,7 @@ void App::monitorLoop() {
                 m_chargerAbsentSince = 0;
 
                 if (!m_chargeOvpLatched) {
-                    if (vbatTrusted && vbat >= m_ovpCutoffV) {
+                    if (ovpActive && chargingNow && vbat >= ovpTripV) {
                         if (!m_ovpSince) m_ovpSince = now;
                         if ((uint32_t)(now - m_ovpSince) >= BATTERY_OVP_DEBOUNCE_MS) {
                             m_chargeOvpLatched = true;
@@ -961,7 +952,7 @@ void App::monitorLoop() {
                     /* latched: auto-recover once the pack relaxes well below
                      * the cutoff, so charging resumes without a replug */
                     static uint32_t relaxSince = 0;
-                    if (vbat <= m_ovpCutoffV - 0.10f) {
+                    if (vbat <= ovpTripV - 0.15f) {
                         if (!relaxSince) relaxSince = now;
                         if ((uint32_t)(now - relaxSince) >= 10000UL) {
                             m_chargeOvpLatched = false;
