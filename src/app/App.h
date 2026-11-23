@@ -85,6 +85,9 @@ public:
     float batVoltage();
     float batCurrent();
     float batPower();
+    /* Presentation helpers: positive = charging, negative = discharging. */
+    float batCurrentCharge() { return -batCurrent(); }
+    float batPowerCharge()   { return -batPower(); }
     float batSOC();
     float batCapacityMah();
     float batVMin() const { return m_batVMin; }

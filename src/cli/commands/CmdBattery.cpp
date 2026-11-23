@@ -10,10 +10,10 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         app.monitor.sampleAll();
         out.println("Battery");
         out.println("Voltage : " + f2str(app.batVoltage()) + " V");
-        out.println("Current : " + f2str(app.batCurrent()) + " A");
-        out.println("Power   : " + f2str(app.batPower()) + " W");
+        out.println("Current : " + f2str(app.batCurrentCharge()) + " A");
+        out.println("Power   : " + f2str(app.batPowerCharge()) + " W");
         out.println("SOC     : " + f2str(app.batSOC(), 0) + " %");
-        out.println("Energy  : " + f2str(app.energyWh(CH_BAT)) + " Wh");
+        out.println("Energy  : " + f2str(app.energyWh(CH_BAT)) + " Wh (net pack)");
         out.println("Capacity: " + f2str(app.batCapacityMah(), 0) + " mAh");
         out.println("Vbat min/max: " + f2str(app.batVMin()) + " / " + f2str(app.batVMax()) + " V");
         if (app.chargeOvpLatched())
@@ -30,8 +30,8 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         return;
     }
     if (sub == "voltage")   { app.monitor.sampleAll(); out.println("Battery voltage: " + f2str(app.batVoltage()) + " V\r\nOK"); return; }
-    if (sub == "current")   { app.monitor.sampleAll(); out.println("Battery current: " + f2str(app.batCurrent()) + " A\r\nOK"); return; }
-    if (sub == "power")     { app.monitor.sampleAll(); out.println("Battery power  : " + f2str(app.batPower()) + " W\r\nOK"); return; }
+    if (sub == "current")   { app.monitor.sampleAll(); out.println("Battery current: " + f2str(app.batCurrentCharge()) + " A\r\nOK"); return; }
+    if (sub == "power")     { app.monitor.sampleAll(); out.println("Battery power  : " + f2str(app.batPowerCharge()) + " W\r\nOK"); return; }
     if (sub == "monitor") {
         int sec = (a.size() >= 3) ? atoi(a[2].c_str()) : 10;
         if (sec < 1) sec = 1;
@@ -41,7 +41,7 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         for (int i = 0; i < sec; i++) {
             app.monitor.sampleAll();
             float v = app.batVoltage();
-            float c = app.batCurrent();
+            float c = app.batCurrentCharge();
             if (v < mn) mn = v;
             if (v > mx) mx = v;
             out.printf("  %2ds  %.3f V  %+6.2f A\r\n", i + 1, v, c);

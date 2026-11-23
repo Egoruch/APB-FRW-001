@@ -46,7 +46,7 @@ static void cmdStatus(Output &out, const std::vector<String> &a) {
     out.println("Uptime  : " + f2str(millis() / 1000.0f, 0) + " s");
     out.println("Battery : " + f2str(App::instance()->batVoltage()) + " V");
     out.println("SOC     : " + f2str(App::instance()->batSOC(), 0) + " %");
-    out.println("Power   : " + f2str(App::instance()->batPower()) + " W");
+    out.println("Power   : " + f2str(App::instance()->batPowerCharge()) + " W");
     out.println("RTC     : " + App::instance()->timeString());
     out.println("MCU temp: " + f2str(temperatureRead(), 1) + " C");
     out.printf("Power rail (3V3+5V): %s\r\n", App::instance()->power.get3V3() ? "ON" : "OFF");

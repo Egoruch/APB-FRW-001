@@ -1024,8 +1024,7 @@ void App::monitorLoop() {
                 }
             }
         }
-        /* battery full (charge done): charger present + SoC ~100% + low C1+C2 current */
-        {
+        /* battery full (charge done): charger present + SoC ~100% + low C1+C2 current */        {
             float soc = batSOC();
             float v1 = monitor.get(CH_C1).voltage;
             float v2 = monitor.get(CH_C2).voltage;
@@ -1054,6 +1053,27 @@ void App::monitorLoop() {
                 m_fullScreenOff = false;
             } else if (!full) {
                 m_chargeDoneNotified = false;
+            }
+        }
+        /* fully discharged: re-baseline the battery Wh counter (drift removal) */
+        {
+            static bool emptyLatch = false;
+            static uint32_t emptySince = 0;
+            float v = batVoltage();
+            bool charging = batCurrent() < -0.05f;
+            bool empty = !charging && v <= BATTERY_EMPTY_VOLTAGE + 0.10f;
+            if (empty) {
+                if (!emptySince) emptySince = millis();
+                if (!emptyLatch && (uint32_t)(millis() - emptySince) >= 5000UL) {
+                    emptyLatch = true;
+                    energy.resetChannel(CH_BAT);
+                    Serial.println("[batt] fully discharged -> battery Wh reset to 0");
+                    display.notify("BATTERY EMPTY", "WH RESET", 4500, 0xF59E0B);
+                }
+            } else {
+                emptySince = 0;
+                if (emptyLatch && (v > BATTERY_EMPTY_VOLTAGE + 0.30f || charging))
+                    emptyLatch = false;   /* re-arm after recovery */
             }
         }
         /* low battery: short + 2 long beeps once; dim red flash every 5 min */

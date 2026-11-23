@@ -17,12 +17,15 @@ static void cmdMonitor(Output &out, const std::vector<String> &a) {
         app.monitor.sampleAll();
         out.printf("%-4s %9s %9s %9s\r\n", "BUS", "V", "A", "W");
         out.printf("%-4s %8.2fV %8.2fA %8.2fW\r\n", "BAT",
-                   app.batVoltage(), app.batCurrent(), app.batPower());
+                   app.batVoltage(), app.batCurrentCharge(), app.batPowerCharge());
         printChannel(out, CH_SYS, "SYS");
         printChannel(out, CH_C1, "C1");
         printChannel(out, CH_C2, "C2");
         printChannel(out, CH_A1, "A1");
         printChannel(out, CH_A2, "A2");
+        printChannel(out, CH_IP1, "IP1");
+        printChannel(out, CH_IP2, "IP2");
+        printChannel(out, CH_ELOAD, "ELOAD");
         out.println("OK");
         return;
     }
@@ -30,8 +33,8 @@ static void cmdMonitor(Output &out, const std::vector<String> &a) {
         app.monitor.sampleAll();
         out.println("Battery");
         out.println("Voltage : " + f2str(app.batVoltage()) + " V");
-        out.println("Current : " + f2str(app.batCurrent()) + " A");
-        out.println("Power   : " + f2str(app.batPower()) + " W");
+        out.println("Current : " + f2str(app.batCurrentCharge()) + " A");
+        out.println("Power   : " + f2str(app.batPowerCharge()) + " W");
         out.println("OK");
         return;
     }

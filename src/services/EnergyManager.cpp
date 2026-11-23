@@ -136,7 +136,10 @@ void EnergyManager::update() {
         m_fram.data().energyWh[i]  += pwr * dt / 3600.0f;
     }
 
-    /* battery (neutral rail): I = SYS + IP1 + IP2 + ELOAD */
+    /* battery (neutral rail): net pack current = SYS + IP1 + IP2 + ELOAD.
+     * Positive = discharge, negative = charging. System consumption is part
+     * of this sum (SYS), so the energy below is NET energy into the pack:
+     * charging adds, discharging subtracts. */
     float batI = 0;
     batI += m_mon.get(CH_SYS).current;
     batI += m_mon.get(CH_IP1).current;

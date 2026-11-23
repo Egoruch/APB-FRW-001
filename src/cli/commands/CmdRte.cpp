@@ -13,7 +13,7 @@ static void cmdRte(Output &out, const std::vector<String> &a) {
 
     out.printf("Battery Wh    : %.3f remaining of %.3f\r\n", remaining, full);
     out.printf("Battery SOC   : %.0f %%\r\n", app.batSOC());
-    out.printf("Battery Power : %.3f W\r\n", w);
+    out.printf("Battery Power : %.3f W\r\n", app.batPowerCharge());
     if (fabsf(w) > 0.05f) {
         float need = (w < 0) ? (full - remaining) : remaining;
         if (need < 0) need = 0;

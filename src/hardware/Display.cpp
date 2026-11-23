@@ -977,8 +977,8 @@ void Display::updateLabels() {
     setTextIfChanged(ui_date, a.dateCached());
 
     fmtVal(b, sizeof(b), a.batVoltage()); setTextIfChanged(ui_batV, b);
-    fmtVal(b, sizeof(b), a.batCurrent()); setTextIfChanged(ui_batA, b);
-    fmtVal(b, sizeof(b), a.batPower());   setTextIfChanged(ui_batW, b);
+    fmtVal(b, sizeof(b), a.batCurrentCharge()); setTextIfChanged(ui_batA, b);
+    fmtVal(b, sizeof(b), a.batPowerCharge());   setTextIfChanged(ui_batW, b);
     fmtVal(b, sizeof(b), a.energyWh(CH_BAT)); setTextIfChanged(ui_batWh, b);
     paintBattery(a.batSOC());
 
