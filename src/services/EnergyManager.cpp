@@ -125,13 +125,12 @@ void EnergyManager::update() {
 
     if (m_sessionEnabled) updatePortSessions(now);
 
-    /* real INA226 channels */
+    /* real INA226 channels: per-port counters are throughput (magnitude),
+     * independent of current direction (charging in or sourcing out). */
     for (int i = 1; i < CH_COUNT; i++) {
         const PowerMeasurement &pm = m_mon.get((PowerChannel)i);
-        float cur = pm.current;
-        float pwr = pm.power;
-        if (cur < 0) cur = 0;                       /* ignore negative (metering) */
-        if (pwr < 0) pwr = 0;
+        float cur = fabsf(pm.current);
+        float pwr = fabsf(pm.power);
         m_fram.data().chargeMah[i] += cur * dt / 3600.0f * 1000.0f;
         m_fram.data().energyWh[i]  += pwr * dt / 3600.0f;
     }

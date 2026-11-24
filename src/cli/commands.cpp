@@ -8,6 +8,8 @@ void registerCommands(CliEngine &cli, App &app) {
     cmdRegisterRte(cli, app);
     cmdRegisterTerminal(cli, app);
     cmdRegisterMonitor(cli, app);
+    cmdRegisterFilter(cli, app);
+    cmdRegisterAutoSleep(cli, app);
     cmdRegisterBattery(cli, app);
     cmdRegisterEnergy(cli, app);
     cmdRegisterSensors(cli, app);

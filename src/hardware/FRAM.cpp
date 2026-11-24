@@ -271,6 +271,82 @@ bool FRAM::uiPrefsSave(uint8_t topPort, uint8_t bottomPort, uint8_t statsOn) {
     return ok;
 }
 
+/* Auto deep-sleep prefs at 0x0240 (separate record). */
+#define FRAM_SLEEP_OFFSET 0x0240u
+#define FRAM_SLEEP_MAGIC  0x534C5031u   /* "SLP1" */
+#define FRAM_SLEEP_LEN    12u
+
+bool FRAM::sleepPrefsLoad(uint16_t &mv, uint8_t &minutes) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_SLEEP_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_SLEEP_OFFSET, (byte)FRAM_SLEEP_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&crc, b + 8, 4);
+    if (magic != FRAM_SLEEP_MAGIC) return false;
+    if (crc != persist_crc32(b, 8)) return false;
+    memcpy(&mv, b + 4, 2);
+    minutes = b[6];
+    return mv >= 3000 && mv <= 4200;
+}
+
+bool FRAM::sleepPrefsSave(uint16_t mv, uint8_t minutes) {
+    if (!m_present) return false;
+    uint8_t b[FRAM_SLEEP_LEN];
+    uint32_t magic = FRAM_SLEEP_MAGIC;
+    uint32_t crc;
+    memset(b, 0, sizeof(b));
+    memcpy(b, &magic, 4);
+    memcpy(b + 4, &mv, 2);
+    b[6] = minutes;
+    crc = persist_crc32(b, 8);
+    memcpy(b + 8, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_SLEEP_OFFSET, (byte)FRAM_SLEEP_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
+/* Current filter preference at 0x0230 (separate record). */
+#define FRAM_FILTER_OFFSET 0x0230u
+#define FRAM_FILTER_MAGIC  0x46494C54u   /* "FILT" */
+#define FRAM_FILTER_LEN    12u
+
+bool FRAM::filterLoad(bool &on) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_FILTER_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_FILTER_OFFSET, (byte)FRAM_FILTER_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&crc, b + 8, 4);
+    if (magic != FRAM_FILTER_MAGIC) return false;
+    if (crc != persist_crc32(b, 8)) return false;
+    on = (b[4] != 0);
+    return true;
+}
+
+bool FRAM::filterSave(bool on) {
+    if (!m_present) return false;
+    uint8_t b[FRAM_FILTER_LEN];
+    uint32_t magic = FRAM_FILTER_MAGIC;
+    uint32_t crc;
+    memset(b, 0, sizeof(b));
+    memcpy(b, &magic, 4);
+    b[4] = on ? 1 : 0;
+    crc = persist_crc32(b, 8);
+    memcpy(b + 8, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_FILTER_OFFSET, (byte)FRAM_FILTER_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
 void FRAM::save() {
     if (!m_present) return;
     bool saved = false;

@@ -49,6 +49,14 @@ public:
     bool uiPrefsLoad(uint8_t &topPort, uint8_t &bottomPort, uint8_t &statsOn);
     bool uiPrefsSave(uint8_t topPort, uint8_t bottomPort, uint8_t statsOn);
 
+    /* Current smoothing filter preference (default ON when no record). */
+    bool filterLoad(bool &on);
+    bool filterSave(bool on);
+
+    /* Auto deep-sleep threshold + idle minutes (0 = off). */
+    bool sleepPrefsLoad(uint16_t &mv, uint8_t &minutes);
+    bool sleepPrefsSave(uint16_t mv, uint8_t minutes);
+
     void erase();   /* writes 0xFF to whole device (config reinitialized) */
 
     uint16_t capacity() const { return m_cap; }

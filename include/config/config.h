@@ -42,6 +42,10 @@
 /* Display/RGB inactivity blanking */
 #define ACTIVITY_TIMEOUT_MS     60000UL
 
+/* Auto deep sleep after the charger is removed at a high pack voltage. */
+#define AUTO_SLEEP_VOLTAGE_V    4.18f
+#define AUTO_SLEEP_MINUTES      30
+
 /* Charging keeps the UI awake (m_externalActive), which would otherwise let a
  * lit RGB effect run forever. Cap the strip indication while charging; the
  * strip goes idle after this window (warnings/low-battery still show). */

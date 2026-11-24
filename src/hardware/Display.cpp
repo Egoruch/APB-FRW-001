@@ -475,7 +475,7 @@ static const CfgItem kCfg[] = {
     {"screen","display screen"},
     {"rtc","rtc"}, {"sensor","sensor list"}, {"status","status"},
     {"rtos","rtos tasks"}, {"wakeup","wakeup"}, {"chargefull","chargefull"},
-    {"stats","display stats"},
+    {"stats","display stats"}, {"filter","filter"}, {"sleep t","autosleep time"}, {"sleep V","autosleep voltage"},
     {"cable","cable"},
     {"cable test","cable test 1.0"},
     {"rte","rte"},
@@ -497,7 +497,10 @@ static bool isScreen(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].na
 static bool isRtc(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "rtc") == 0; }
 static bool isLog(int i)   { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "log") == 0; }
 static bool isStats(int i) { return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "stats") == 0; }
-static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i)||isPortEnergy(i)||isStats(i); }
+static bool isFilter(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "filter") == 0; }
+static bool isSleepT(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "sleep t") == 0; }
+static bool isSleepV(int i){ return i >= 0 && i < kCfgCount && strcmp(kCfg[i].name, "sleep V") == 0; }
+static bool isSubList(int i) { return isMcu(i)||isMelody(i)||isBuzzer(i)||isFram(i)||isRgb(i)||isScreen(i)||isRtc(i)||isTimeout(i)||isLog(i)||isPortEnergy(i)||isStats(i)||isFilter(i)||isSleepT(i)||isSleepV(i); }
 
 /* subcommand list for list-type items */
 static const char *const *subList(int i, int *n) {
@@ -512,6 +515,9 @@ static const char *const *subList(int i, int *n) {
     static const char *const subTimeout[5] = {"off","30","60","120","180"};
     static const char *const subPortEnergy[3] = {"status","on","off"};
     static const char *const subStats[3] = {"status","on","off"};
+    static const char *const subFilter[3] = {"status","on","off"};
+    static const char *const subSleepT[5] = {"off","15","30","60","120"};
+    static const char *const subSleepV[5] = {"3.80","4.00","4.10","4.18","4.20"};
     static const char *const subLog[7] = {"status","enable","disable","level error","level warn","level info","level debug"};
     if (isMcu(i))     { *n = 6; return subMcu; }
     if (isMelody(i))  { *n = 3; return subMelody; }
@@ -524,6 +530,9 @@ static const char *const *subList(int i, int *n) {
     if (isTimeout(i)) { *n = 5; return subTimeout; }
     if (isPortEnergy(i)) { *n = 3; return subPortEnergy; }
     if (isStats(i))    { *n = 3; return subStats; }
+    if (isFilter(i))   { *n = 3; return subFilter; }
+    if (isSleepT(i))   { *n = 5; return subSleepT; }
+    if (isSleepV(i))   { *n = 5; return subSleepV; }
     if (isLog(i))     { *n = 7; return subLog; }
     *n = 0; return nullptr;
 }
@@ -647,6 +656,15 @@ void Display::updateScreen3() {
                                               (m_app && m_app->energy.sessionEnabled()) ? "ON" : "off");
             else if (isStats(i)) snprintf(b, sizeof(b), "%s stats %s", (i == m_cfgSel ? ">" : " "),
                                           m_showStats ? "ON" : "off");
+            else if (isFilter(i)) snprintf(b, sizeof(b), "%s filter %s", (i == m_cfgSel ? ">" : " "),
+                                           (m_app && m_app->monitor.currentFilter()) ? "ON" : "off");
+            else if (isSleepT(i)) {
+                uint8_t m = m_app ? m_app->autoSleepMinutes() : 0;
+                if (m == 0) snprintf(b, sizeof(b), "%s sleep t off", (i == m_cfgSel ? ">" : " "));
+                else snprintf(b, sizeof(b), "%s sleep t %umin", (i == m_cfgSel ? ">" : " "), m);
+            }
+            else if (isSleepV(i)) snprintf(b, sizeof(b), "%s sleep V %.2fV", (i == m_cfgSel ? ">" : " "),
+                                           m_app ? m_app->autoSleepVoltage() : 0.0f);
             else if (isEnergy(i)) snprintf(b, sizeof(b), "%s energy %.1f Wh", (i == m_cfgSel ? ">" : " "), m_cfgNum);
             else if (isOvp(i)) {
                 float v = (m_cfgActive && i == m_cfgSel) ? m_cfgNum

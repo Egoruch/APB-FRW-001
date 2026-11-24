@@ -28,9 +28,17 @@ public:
     /* reset accumulated counters of a channel to zero */
     void resetChannel(PowerChannel ch);
 
+    /* Current smoothing: EMA + deadband, keeps display stable at low currents.
+     * Enabled by default; toggled from CLI/menu. */
+    void setCurrentFilter(bool on);
+    bool currentFilter() const { return m_filter; }
+
 private:
     INA226 m_ina[CH_COUNT];
     bool m_ok[CH_COUNT];
     PowerMeasurement m_meas[CH_COUNT];
+    bool m_filter = true;
+    float m_filtI[CH_COUNT] = {};
+    bool m_filtInit[CH_COUNT] = {};
     static const uint8_t kAddr[CH_COUNT];
 };

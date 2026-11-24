@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cli/CliEngine.h"
 
 class App;
@@ -11,6 +11,8 @@ void cmdRegisterEload(CliEngine &cli, App &app);
 void cmdRegisterRte(CliEngine &cli, App &app);
 void cmdRegisterTerminal(CliEngine &cli, App &app);
 void cmdRegisterMonitor(CliEngine &cli, App &app);
+void cmdRegisterFilter(CliEngine &cli, App &app);
+void cmdRegisterAutoSleep(CliEngine &cli, App &app);
 void cmdRegisterBattery(CliEngine &cli, App &app);
 void cmdRegisterEnergy(CliEngine &cli, App &app);
 void cmdRegisterSensors(CliEngine &cli, App &app);

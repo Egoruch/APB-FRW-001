@@ -64,12 +64,29 @@ bool PowerMonitor::hasAll() const {
     return true;
 }
 
+void PowerMonitor::setCurrentFilter(bool on) {
+    m_filter = on;
+    for (int i = 0; i < CH_COUNT; i++) m_filtInit[i] = false;
+}
+
 void PowerMonitor::sampleChannel(PowerChannel ch) {    if (ch == CH_BAT) return; /* computed elsewhere */
     if (ch < 0 || ch >= CH_COUNT || !m_ok[ch]) return;
     if (!i2cBusLock(50)) return;
     m_meas[ch].voltage = m_ina[ch].getBusVoltage();
-    m_meas[ch].current = m_ina[ch].getCurrent();
-    m_meas[ch].power   = m_ina[ch].getPower();
+    float raw = m_ina[ch].getCurrent();
+    if (m_filter) {
+        /* Fast EMA (~0.25 s) + 10 mA deadband: stable at rest, still tracks
+         * load steps within a few 100 ms updates (10 Hz sampling). */
+        if (!m_filtInit[ch]) { m_filtI[ch] = raw; m_filtInit[ch] = true; }
+        else m_filtI[ch] += 0.35f * (raw - m_filtI[ch]);
+        float cur = m_filtI[ch];
+        if (fabsf(cur) < 0.005f) cur = 0.0f;
+        m_meas[ch].current = cur;
+        m_meas[ch].power = m_meas[ch].voltage * cur;
+    } else {
+        m_meas[ch].current = raw;
+        m_meas[ch].power = m_meas[ch].voltage * raw;
+    }
     m_meas[ch].timestamp = millis();
     i2cBusUnlock();
 }

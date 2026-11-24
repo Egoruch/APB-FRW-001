@@ -82,6 +82,19 @@ void App::begin() {
     fram.begin();        Serial.println("[app] fram ok");
     loadOvpCutoff();
     monitor.begin();     Serial.println("[app] monitor(INA) ok");
+    {
+        bool filt = true;                    /* filter enabled by default */
+        if (fram.isPresent() && fram.filterLoad(filt)) { /* stored preference */ }
+        monitor.setCurrentFilter(filt);
+    }
+    {
+        uint16_t mv = (uint16_t)(AUTO_SLEEP_VOLTAGE_V * 1000.0f);
+        uint8_t mins = AUTO_SLEEP_MINUTES;
+        if (fram.isPresent() && fram.sleepPrefsLoad(mv, mins)) {
+            m_sleepVmv = mv;
+            m_sleepMin = mins;
+        }
+    }
     temps.begin();       Serial.println("[app] temps ok");
     time.setSource((TimeSource)fram.data().timeSource);   /* 0 = RTC, 1 = software */
     time.begin(&fram);   Serial.println("[app] time ok");
@@ -293,6 +306,7 @@ void App::markActivity() {
 bool App::markActivityWoke() {
     bool idle = m_activityIdle;
     m_lastActivityMs = millis();
+    m_sleepSince = 0;                       /* user activity restarts auto-sleep timer */
     if (!idle) return false;
     m_activityIdle = false;
     uint8_t b = m_prevBrightness ? m_prevBrightness : DISP_BL_DEFAULT;
@@ -331,14 +345,28 @@ void App::loadOvpCutoff() {
     else                  m_ovpCutoffV = 4.20f;
 }
 
-bool App::setOvpCutoffVoltage(float v) {
-    if (v < 3.00f || v > 4.20f) return false;
+bool App::setOvpCutoffVoltage(float v) {    if (v < 3.00f || v > 4.20f) return false;
     uint16_t mv = (uint16_t)((v * 1000.0f) / 10.0f + 0.5f) * 10u;
     if (mv < 3000 || mv > 4200) return false;
     m_ovpCutoffV = (float)mv / 1000.0f;
     bool saved = fram.ovpSave(mv);
     Serial.printf("[batt] OVP cutoff set to %.2f V%s\r\n",
                   m_ovpCutoffV, saved ? "" : " (not persisted)");
+    return true;
+}
+
+bool App::setAutoSleepVoltage(float v) {
+    if (v < 3.00f || v > 4.20f) return false;
+    m_sleepVmv = (uint16_t)(v * 1000.0f + 0.5f);
+    fram.sleepPrefsSave(m_sleepVmv, m_sleepMin);
+    m_sleepSince = 0;
+    return true;
+}
+
+bool App::setAutoSleepMinutes(uint8_t minutes) {
+    m_sleepMin = minutes;
+    fram.sleepPrefsSave(m_sleepVmv, m_sleepMin);
+    m_sleepSince = 0;
     return true;
 }
 
@@ -899,13 +927,11 @@ void App::monitorLoop() {
                                   (monitor.get(CH_C2).voltage > 3.7f);
             bool chargingNow = (monitor.get(CH_C1).current > 0.05f) ||
                                (monitor.get(CH_C2).current > 0.05f);
-            /* No background PMIC sessions here: probing the mux while an
-             * IP5356 branch is asleep wedges the ESP32-C6 i2c-ng driver
-             * (permanent ESP_ERR_INVALID_STATE). Use the SYS INA and a
-             * safety margin instead. At >= 4.15 V the PMIC's own 4.20 V CV
-             * is the correct limit, so firmware OVP is disabled there. */
-            const bool ovpActive = (m_ovpCutoffV < 4.15f);
-            const float ovpTripV = m_ovpCutoffV + 0.06f;   /* INA reads ~90 mV high */
+            /* INA226 VBUS is wired directly to battery+, so this is the cell
+             * voltage and is trustworthy. Enforce the cutoff with a small
+             * margin for noise; at the 4.20 V setting the trip doubles as the
+             * full-charge event (green light + beep). */
+            const float ovpTripV = m_ovpCutoffV + 0.01f;
 
             uint32_t now = millis();
             SerialOutput out;
@@ -924,7 +950,7 @@ void App::monitorLoop() {
                 m_chargerAbsentSince = 0;
 
                 if (!m_chargeOvpLatched) {
-                    if (ovpActive && chargingNow && vbat >= ovpTripV) {
+                    if (chargingNow && vbat >= ovpTripV) {
                         if (!m_ovpSince) m_ovpSince = now;
                         if ((uint32_t)(now - m_ovpSince) >= BATTERY_OVP_DEBOUNCE_MS) {
                             m_chargeOvpLatched = true;
@@ -1035,7 +1061,9 @@ void App::monitorLoop() {
             bool chargerConnected = (v1 > 3.7f) || (v2 > 3.7f);
             float ichg = (i1 < 0 ? -i1 : i1) + (i2 < 0 ? -i2 : i2);
             bool full = chargerConnected && (soc >= 99.5f) &&
-                        (ichg <= 0.25f) && (batCurrent() < 0.05f);
+                        (ichg <= 1.0f) &&
+                        (batVoltage() >= (m_ovpCutoffV - 0.02f) ||
+                         fabsf(batCurrent()) < 0.20f);
             static bool fullCandidate = false;
             static uint32_t fullSince = 0;
             if (full) {
@@ -1143,6 +1171,25 @@ void App::monitorLoop() {
                 } else {
                     enterDeepSleep();
                 }
+            }
+        }
+        /* auto deep sleep: charger removed, no load, pack at/above threshold */
+        {
+            bool charger = (monitor.get(CH_C1).voltage > 3.7f) ||
+                           (monitor.get(CH_C2).voltage > 3.7f);
+            bool load = fabsf(monitor.get(CH_A1).current) > 0.05f ||
+                        fabsf(monitor.get(CH_A2).current) > 0.05f || m_eloadRunning;
+            bool high = batVoltage() >= (float)m_sleepVmv / 1000.0f;
+            if (m_sleepMin > 0 && !charger && !load && high) {
+                if (!m_sleepSince) m_sleepSince = millis();
+                else if ((uint32_t)(millis() - m_sleepSince) >=
+                         (uint32_t)m_sleepMin * 60000UL) {
+                    m_sleepSince = 0;
+                    Serial.println("[pwr] auto-sleep: unplugged at high pack voltage");
+                    enterDeepSleep();
+                }
+            } else {
+                m_sleepSince = 0;
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BATTERY_SAMPLE_MS));   /* 100 ms: finer mAh/Wh integration */

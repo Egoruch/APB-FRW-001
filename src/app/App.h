@@ -98,6 +98,11 @@ public:
     uint32_t ovpTripMs() const { return m_ovpTripMs; }
     float ovpCutoffVoltage() const { return m_ovpCutoffV; }
     bool setOvpCutoffVoltage(float v);
+    /* Auto deep sleep after charger removal above a pack-voltage threshold. */
+    float autoSleepVoltage() const { return (float)m_sleepVmv / 1000.0f; }
+    uint8_t autoSleepMinutes() const { return m_sleepMin; }
+    bool setAutoSleepVoltage(float v);
+    bool setAutoSleepMinutes(uint8_t minutes);
     PowerMeasurement &meas(PowerChannel ch) { return monitor.get(ch); }
 
     void setLight(uint8_t pct);
@@ -186,6 +191,9 @@ private:
     bool m_fullScreenOff = false;
     float m_batVMin = 0, m_batVMax = 0;           /* battery voltage extremes since boot */
     bool m_batVInit = false;
+    uint16_t m_sleepVmv = 4180;                   /* auto-sleep threshold mV */
+    uint8_t m_sleepMin = 30;                      /* auto-sleep idle minutes (0=off) */
+    uint32_t m_sleepSince = 0;                    /* auto-sleep idle timer */
 };
 
 
