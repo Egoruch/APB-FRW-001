@@ -56,7 +56,12 @@ float BatteryManager::energyWh() const {
 }
 
 float BatteryManager::energyRemainingWh() const {
-    return capacityMah() / 1000.0f * BATTERY_NOMINAL_VOLTAGE * soc() / 100.0f;
+    /* Use the actual battery energy counter shown on screen: it is reset at
+     * full discharge and integrates net pack energy, so it represents the
+     * energy available now. The old capacity*SOC estimate ignored the real
+     * pack size and made RtE wrong on multi-cell packs. */
+    float e = energyWh();
+    return (e > 0.0f) ? e : 0.0f;
 }
 
 void BatteryManager::recalibrate() {

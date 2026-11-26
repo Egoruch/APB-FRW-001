@@ -1,5 +1,6 @@
 #include "cli/commands.h"
 #include "app/App.h"
+#include "config/battery_config.h"
 
 static void cmdBattery(Output &out, const std::vector<String> &a) {
     App &app = *App::instance();
@@ -52,6 +53,14 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
     }
     if (sub == "soc")       { out.println("Battery SOC    : " + f2str(app.batSOC(), 0) + " %\r\nOK"); return; }
     if (sub == "capacity" && a.size() >= 3) {
+        if (a[2].equalsIgnoreCase("measure")) {
+            float wh = app.energyWh(CH_BAT);
+            if (wh < 5.0f) { out.println("ERROR battery energy too low"); return; }
+            float mah = wh * 1000.0f / BATTERY_NOMINAL_VOLTAGE;
+            app.battery.setCapacityMah(mah);
+            out.printf("OK capacity = %.1f Wh / 3.7V = %.0f mAh\r\n", wh, mah);
+            return;
+        }
         float mah = atof(a[2].c_str());
         app.battery.setCapacityMah(mah);
         out.println("OK battery capacity set");
@@ -63,7 +72,8 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
     if (sub == "rte") {
         app.monitor.sampleAll();
         float remaining = app.battery.energyRemainingWh();
-        float full = app.batCapacityMah() / 1000.0f * 3.70f;
+        float full = app.batFullEnergyWh();
+        if (full < remaining) full = remaining;
         float w  = app.batPower();
         if (fabsf(w) > 0.05f) {
             float need = (w < 0) ? (full - remaining) : remaining;

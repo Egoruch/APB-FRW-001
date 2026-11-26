@@ -1035,7 +1035,8 @@ void Display::updateLabels() {
     setEff(ui_effA1, a1P, c1In ? c1Den : effDen(ip1P, batP));
     setEff(ui_effA2, a2P, c2In ? c2Den : effDen(ip2P, batP));
     float rteRemaining = a.battery.energyRemainingWh();
-    float rteFull = a.batCapacityMah() / 1000.0f * BATTERY_NOMINAL_VOLTAGE;
+    float rteFull = a.batFullEnergyWh();
+    if (rteFull < rteRemaining) rteFull = rteRemaining;
     float rteW  = a.batPower();   /* negative = charging */
     if (fabsf(rteW) > 0.05f) {
         float need = (rteW < 0) ? (rteFull - rteRemaining) : rteRemaining;

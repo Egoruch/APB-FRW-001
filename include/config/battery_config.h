@@ -6,8 +6,10 @@
 #define BATTERY_FULL_VOLTAGE      4.20f
 #define BATTERY_EMPTY_VOLTAGE     3.00f
 #define BATTERY_NOMINAL_VOLTAGE   3.70f
-#define BATTERY_CAPACITY_MAH      4800.0f   /* nominal 3s? no: pack capacity mAh */
-#define BATTERY_PACKS_IN_PARALLEL 1
+/* batteryCapacityMah is the TOTAL pack capacity (6 cells in parallel). */
+#define BATTERY_CELL_CAPACITY_MAH 4800.0f
+#define BATTERY_PACKS_IN_PARALLEL 6
+#define BATTERY_CAPACITY_MAH      (BATTERY_CELL_CAPACITY_MAH * BATTERY_PACKS_IN_PARALLEL)
 #define BATTERY_ENERGY_FULL_WH    (BATTERY_CAPACITY_MAH / 1000.0f * BATTERY_NOMINAL_VOLTAGE)
 
 /* Battery over-voltage protection: latch the IP5356 chargers off at/above

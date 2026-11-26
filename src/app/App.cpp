@@ -95,6 +95,15 @@ void App::begin() {
             m_sleepMin = mins;
         }
     }
+    /* Migrate the old per-cell default (4800) using the measured energy:
+     * total capacity = Wh / 3.7 V. */
+    if (fram.isPresent() &&
+        fabsf(fram.data().batteryCapacityMah - BATTERY_CELL_CAPACITY_MAH) < 1.0f) {
+        float wh = fram.data().energyWh[CH_BAT];
+        float mah = (wh > 5.0f) ? (wh * 1000.0f / BATTERY_NOMINAL_VOLTAGE)
+                                : (BATTERY_CELL_CAPACITY_MAH * BATTERY_PACKS_IN_PARALLEL);
+        battery.setCapacityMah(mah);
+    }
     temps.begin();       Serial.println("[app] temps ok");
     time.setSource((TimeSource)fram.data().timeSource);   /* 0 = RTC, 1 = software */
     time.begin(&fram);   Serial.println("[app] time ok");
@@ -297,6 +306,21 @@ float App::batCurrent()    { return battery.current(); }
 float App::batPower()      { return battery.power(); }
 float App::batSOC()        { return battery.soc(); }
 float App::batCapacityMah(){ return battery.capacityMah(); }
+float App::batFullEnergyWh() {
+    return battery.capacityMah() / 1000.0f * BATTERY_NOMINAL_VOLTAGE;
+}
+
+void App::calibrateCapacityFromWh() {
+    /* At charge-complete the Wh counter approximates usable pack energy:
+     * total pack capacity = Wh / 3.7 V. */
+    float wh = energy.energyWh(CH_BAT);
+    if (wh < 5.0f) return;
+    float mah = wh * 1000.0f / BATTERY_NOMINAL_VOLTAGE;
+    if (mah < 5000.0f || mah > 60000.0f) return;
+    battery.setCapacityMah(mah);
+    Serial.printf("[batt] capacity measured: %.0f mAh total (%.1f Wh / 3.7V)\r\n",
+                  mah, wh);
+}
 float App::energyWh(PowerChannel ch) { return energy.energyWh(ch); }
 
 void App::markActivity() {
@@ -962,6 +986,7 @@ void App::monitorLoop() {
                             if (m_ovpCutoffV >= 4.15f) {
                                 /* full-charge cutoff: treat as charge complete */
                                 startChargeDoneAlarm();
+                                calibrateCapacityFromWh();
                                 m_fullSeq = 1;
                                 m_fullSeqMs = millis();
                                 m_fullScreenOff = false;
@@ -1076,6 +1101,7 @@ void App::monitorLoop() {
                 m_chargeDoneNotified = true;
                 Serial.println("[charge] battery full -> charge-done alarm");
                 startChargeDoneAlarm();
+                calibrateCapacityFromWh();
                 m_fullSeq = 1;
                 m_fullSeqMs = millis();
                 m_fullScreenOff = false;

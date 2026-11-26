@@ -90,6 +90,7 @@ public:
     float batPowerCharge()   { return -batPower(); }
     float batSOC();
     float batCapacityMah();
+    float batFullEnergyWh();      /* per-cell capacity x 3.7 V x parallel cells */
     float batVMin() const { return m_batVMin; }
     float batVMax() const { return m_batVMax; }
     float energyWh(PowerChannel ch);
@@ -175,6 +176,7 @@ private:
     bool disableChargingIPs();
     bool enableChargingIPs();
     void loadOvpCutoff();
+    void calibrateCapacityFromWh();
     volatile void *m_melodyTask = nullptr;        /* running melody task handle */
     BuzzerNote *m_melodyPack = nullptr;           /* its heap note pack */
     volatile float m_eloadR = 0;                  /* last ELOAD resistance (mOhm) */

@@ -8,7 +8,8 @@ static void cmdRte(Output &out, const std::vector<String> &a) {
     (void)a;
     App &app = *App::instance();
     float remaining = app.battery.energyRemainingWh();
-    float full = app.batCapacityMah() / 1000.0f * BATTERY_NOMINAL_VOLTAGE;
+    float full = app.batFullEnergyWh();
+    if (full < remaining) full = remaining;
     float w = app.batPower();   /* negative = charging (see EnergyManager) */
 
     out.printf("Battery Wh    : %.3f remaining of %.3f\r\n", remaining, full);
