@@ -57,6 +57,11 @@ public:
     bool sleepPrefsLoad(uint16_t &mv, uint8_t &minutes);
     bool sleepPrefsSave(uint16_t mv, uint8_t minutes);
 
+    /* SOC calculation method + coulomb-counter state:
+     * method 0 = voltage lookup, 1 = mAh coulomb counter. */
+    bool socPrefsLoad(uint8_t &method, float &fullMah, float &countedMah, float &socPct, uint8_t &anchored);
+    bool socPrefsSave(uint8_t method, float fullMah, float countedMah, float socPct, uint8_t anchored);
+
     void erase();   /* writes 0xFF to whole device (config reinitialized) */
 
     uint16_t capacity() const { return m_cap; }

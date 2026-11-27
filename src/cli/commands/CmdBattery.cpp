@@ -14,6 +14,14 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         out.println("Current : " + f2str(app.batCurrentCharge()) + " A");
         out.println("Power   : " + f2str(app.batPowerCharge()) + " W");
         out.println("SOC     : " + f2str(app.batSOC(), 0) + " %");
+        if (app.battery.socMethod() == BatteryManager::SOC_ENERGY) {
+            if (app.battery.fullCapacityMah() > 1.0f)
+                out.printf("SOC method: energy (full %.0f mAh, counted %.0f mAh)\r\n",
+                           app.battery.fullCapacityMah(), app.battery.countedMah());
+            else
+                out.printf("SOC method: energy (not learned, counted %.0f mAh, using voltage)\r\n", app.battery.countedMah());
+        } else
+            out.println("SOC method: voltage");
         out.println("Energy  : " + f2str(app.energyWh(CH_BAT)) + " Wh (net pack)");
         out.println("Capacity: " + f2str(app.batCapacityMah(), 0) + " mAh");
         out.println("Vbat min/max: " + f2str(app.batVMin()) + " / " + f2str(app.batVMax()) + " V");
@@ -51,7 +59,41 @@ static void cmdBattery(Output &out, const std::vector<String> &a) {
         out.println("OK");
         return;
     }
-    if (sub == "soc")       { out.println("Battery SOC    : " + f2str(app.batSOC(), 0) + " %\r\nOK"); return; }
+    if (sub == "soc") {
+        if (a.size() >= 3) {
+            String m = a[2];
+            m.toLowerCase();
+            if (m == "status") {
+                if (app.battery.socMethod() == BatteryManager::SOC_ENERGY) {
+                    if (app.battery.fullCapacityMah() > 1.0f)
+                        out.printf("SOC method: energy (full %.0f mAh, counted %.0f mAh)\r\n",
+                                   app.battery.fullCapacityMah(), app.battery.countedMah());
+                    else
+                        out.printf("SOC method: energy (not learned, counted %.0f mAh, using voltage)\r\n", app.battery.countedMah());
+                } else {
+                    out.println("SOC method: voltage");
+                }
+                out.println("OK");
+                return;
+            }
+            if (m == "voltage" || m == "v") {
+                app.battery.setSocMethod(BatteryManager::SOC_VOLTAGE);
+                out.println("OK SOC method: voltage");
+                return;
+            }
+            if (m == "energy" || m == "coulomb" || m == "wh") {
+                app.battery.setSocMethod(BatteryManager::SOC_ENERGY);
+                out.println("OK SOC method: energy");
+                return;
+            }
+            out.println("ERROR battery soc <status|voltage|energy>");
+            return;
+        }
+        out.printf("Battery SOC    : %.0f %% (%s)\r\n", app.batSOC(),
+                   app.battery.socMethod() == BatteryManager::SOC_ENERGY ? "energy" : "voltage");
+        out.println("OK");
+        return;
+    }
     if (sub == "capacity" && a.size() >= 3) {
         if (a[2].equalsIgnoreCase("measure")) {
             float wh = app.energyWh(CH_BAT);

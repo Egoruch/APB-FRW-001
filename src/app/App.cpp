@@ -318,8 +318,9 @@ void App::calibrateCapacityFromWh() {
     float mah = wh * 1000.0f / BATTERY_NOMINAL_VOLTAGE;
     if (mah < 5000.0f || mah > 60000.0f) return;
     battery.setCapacityMah(mah);
-    Serial.printf("[batt] capacity measured: %.0f mAh total (%.1f Wh / 3.7V)\r\n",
-                  mah, wh);
+    battery.anchorFull();              /* learn full mAh, coulomb SOC=100% */
+    Serial.printf("[batt] capacity measured: %.0f mAh total (%.1f Wh / 3.7V), full %.1f Wh\r\n",
+                  mah, wh, wh);
 }
 float App::energyWh(PowerChannel ch) { return energy.energyWh(ch); }
 
@@ -794,6 +795,7 @@ void App::monitorLoop() {
     for (;;) {
         monitor.sampleAll();
         energy.update();
+        battery.update(-batCurrent());   /* coulomb counter: positive = charging */
         {
             float bv = batVoltage();
             if (!m_batVInit) { m_batVMin = m_batVMax = bv; m_batVInit = true; }
@@ -1121,6 +1123,7 @@ void App::monitorLoop() {
                 if (!emptyLatch && (uint32_t)(millis() - emptySince) >= 5000UL) {
                     emptyLatch = true;
                     energy.resetChannel(CH_BAT);
+                    battery.anchorEmpty();
                     Serial.println("[batt] fully discharged -> battery Wh reset to 0");
                     display.notify("BATTERY EMPTY", "WH RESET", 4500, 0xF59E0B);
                 }

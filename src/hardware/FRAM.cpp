@@ -271,6 +271,54 @@ bool FRAM::uiPrefsSave(uint8_t topPort, uint8_t bottomPort, uint8_t statsOn) {
     return ok;
 }
 
+/* SOC method + coulomb-counter state at 0x0250 (separate record).
+ * layout: magic(4) method(1) pad(3) fullMah(4) countedMah(4) socPct(4) pad(4) crc(4) */
+#define FRAM_SOC_OFFSET 0x0250u
+#define FRAM_SOC_MAGIC  0x534F4333u   /* "SOC3" */
+#define FRAM_SOC_LEN    28u
+
+bool FRAM::socPrefsLoad(uint8_t &method, float &fullMah, float &countedMah, float &socPct, uint8_t &anchored) {
+    if (!m_present) return false;
+    if (!i2cBusLock(200)) return false;
+    uint8_t b[FRAM_SOC_LEN];
+    bool ok = (m_fram.readArray((uint16_t)FRAM_SOC_OFFSET, (byte)FRAM_SOC_LEN, b) == 0);
+    i2cBusUnlock();
+    if (!ok) return false;
+    uint32_t magic, crc;
+    memcpy(&magic, b, 4);
+    memcpy(&crc, b + 24, 4);
+    if (magic != FRAM_SOC_MAGIC) return false;
+    if (crc != persist_crc32(b, 24)) return false;
+    method = b[4];
+    memcpy(&fullMah, b + 8, 4);
+    memcpy(&countedMah, b + 12, 4);
+    memcpy(&socPct, b + 16, 4);
+    anchored = b[20];
+    return method <= 1 && fullMah >= 0.0f && fullMah < 100000.0f &&
+           countedMah > -100000.0f && countedMah < 100000.0f &&
+           socPct >= -1.0f && socPct <= 101.0f;
+}
+
+bool FRAM::socPrefsSave(uint8_t method, float fullMah, float countedMah, float socPct, uint8_t anchored) {
+    if (!m_present) return false;
+    uint8_t b[FRAM_SOC_LEN];
+    uint32_t magic = FRAM_SOC_MAGIC;
+    uint32_t crc;
+    memset(b, 0, sizeof(b));
+    memcpy(b, &magic, 4);
+    b[4] = method ? 1 : 0;
+    memcpy(b + 8, &fullMah, 4);
+    memcpy(b + 12, &countedMah, 4);
+    memcpy(b + 16, &socPct, 4);
+    b[20] = anchored ? 1 : 0;
+    crc = persist_crc32(b, 24);
+    memcpy(b + 24, &crc, 4);
+    if (!i2cBusLock(500)) return false;
+    bool ok = (m_fram.writeArray((uint16_t)FRAM_SOC_OFFSET, (byte)FRAM_SOC_LEN, b) == 0);
+    i2cBusUnlock();
+    return ok;
+}
+
 /* Auto deep-sleep prefs at 0x0240 (separate record). */
 #define FRAM_SLEEP_OFFSET 0x0240u
 #define FRAM_SLEEP_MAGIC  0x534C5031u   /* "SLP1" */
